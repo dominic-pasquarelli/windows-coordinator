@@ -1,0 +1,77 @@
+// -------------------------------------------------------------------------------------------------
+// WARNING — NEVER COMPILED. Authored 2026-08-08 in an environment with no .NET SDK. Not one line of
+// C# in this repository has been through a compiler, an analyzer, or a test runner. Treat every
+// signature in this file as a proposal to be verified by the first build, not as working code.
+// See docs/NEXT.md (Active focus) and TD-1 in docs/TECH_DEBT.md.
+// -------------------------------------------------------------------------------------------------
+
+using Coordinator.Platform;
+
+namespace Coordinator.Conduit;
+
+/// <summary>
+/// One delivered wake-up: a declared intent fired, and here is the capability it addresses.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Notice what is <b>not</b> here: no key code, no window handle, no timer reference, no mechanism
+/// of any kind. That absence is the pillar's entire purpose. A module's handler receives its own
+/// capability id and can be written, and tested, by someone who has never thought about input.
+/// </para>
+/// <para>
+/// A window-event dispatch carries no window either, deliberately: an event says the desktop
+/// changed, and what the desktop now <i>is</i> comes from a single coherent snapshot taken by the
+/// other pillar. Two sources of desktop truth is the thing that pillar exists to prevent.
+/// </para>
+/// </remarks>
+/// <param name="Intent">Which declared intent fired.</param>
+/// <param name="Capability">The capability to act on — the module's own id, from its declaration.</param>
+/// <param name="MonotonicStamp">
+/// When the originating event was observed, in ticks from a <b>monotonic</b> source — not the wall
+/// clock, which jumps backwards and forwards on clock sync, time-zone transitions, and a user
+/// setting the time. The value is meaningful only when compared against another reading of the same
+/// source, and a handler that wants to know how stale its wake-up is computes that itself, at the
+/// moment it actually matters.
+/// </param>
+public sealed record TriggerEvent(
+    TriggerIntentId Intent,
+    CapabilityId Capability,
+    long MonotonicStamp);
+
+/// <summary>
+/// What the fabric calls when a declared intent fires.
+/// </summary>
+/// <param name="triggerEvent">The wake-up.</param>
+/// <param name="cancellationToken">
+/// Cancelled when the module is being disabled or the host is shutting down. A handler that ignores
+/// it is a handler that delays shutdown.
+/// </param>
+/// <remarks>
+/// <para>
+/// <b>This never runs on an input hook thread.</b> While a low-level input hook callback is
+/// running, the keystroke it is inspecting has not yet been delivered to the application the user
+/// is typing into — so a handler that blocks there does not slow this application down, it stalls
+/// every application on the machine. Worse, the system applies a timeout to such hooks and silently
+/// removes one that exceeds it: the punishment for being slow is that input stops working, with no
+/// exception and no log entry.
+/// </para>
+/// <para>
+/// The containment property that buys back is worth stating plainly: because dispatch happens on a
+/// worker, a module that does something slow in a handler makes <i>itself</i> sluggish and cannot
+/// make the desktop sluggish. That is the deal. It does not license blocking on the network or on
+/// slow disk here — the user is still waiting — but the blast radius is bounded to the module.
+/// </para>
+/// <para>
+/// <b>A handler is never re-entered for the same intent.</b> Dispatch is serialised per intent: if
+/// a trigger fires while its handler is still running, the second event is coalesced or dropped,
+/// not delivered concurrently. Re-entrancy in a hotkey handler is a bug factory, and it is far
+/// cheaper to forbid it once in the fabric than to document it in every module.
+/// </para>
+/// <para>
+/// Asynchronous because the natural response to most triggers is asynchronous, and because a
+/// synchronous signature would quietly invite blocking on the dispatch worker.
+/// </para>
+/// </remarks>
+public delegate ValueTask TriggerDispatchHandler(
+    TriggerEvent triggerEvent,
+    CancellationToken cancellationToken);

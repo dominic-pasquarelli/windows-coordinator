@@ -1,0 +1,159 @@
+# Windows Coordinator — ignore rules
+#
+# Two jobs: keep build output and machine-specific state out of the repository, and make it
+# impossible to commit the things that would be embarrassing or harmful (credentials, update-feed
+# secrets, signing material, local paths). Anything environment-specific ships as a committed
+# `.example` file with the real one ignored — see CLAUDE.md, "Never commit secrets".
+
+# ── .NET build output ────────────────────────────────────────────────────────────────────────────
+# `[Bb]in`/`[Oo]bj` spelled case-insensitively because MSBuild, the IDEs and hand-written scripts
+# disagree about capitalisation and git is case-sensitive on Linux.
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+[Pp]ublish/
+TestResults/
+[Tt]est[Rr]esults/
+*.dll
+*.exe
+*.pdb
+*.mdb
+*.dSYM/
+*.binlog
+project.lock.json
+project.fragment.lock.json
+*.nuget.props
+*.nuget.targets
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+.packages/
+BenchmarkDotNet.Artifacts/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+*.opencover.xml
+
+# ── Visual Studio ────────────────────────────────────────────────────────────────────────────────
+.vs/
+*.suo
+*.user
+*.userosscache
+*.userprefs
+*.sln.docstates
+*.sln.ide/
+*.vsp
+*.vspx
+*.psess
+*.vsps
+*.svclog
+*.VC.db
+*.VC.VC.opendb
+*_i.c
+*_p.c
+*_h.h
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.ipdb
+*.tlb
+*.tli
+*.tlh
+*.tmp_proj
+*.log
+*.tlog
+*.vspscc
+*.vssscc
+.builds
+UpgradeLog*.XML
+UpgradeLog*.htm
+_UpgradeReport_Files/
+Backup*/
+
+# ── JetBrains Rider / ReSharper ──────────────────────────────────────────────────────────────────
+.idea/
+*.sln.iml
+*.DotSettings.user
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# ── Visual Studio Code ───────────────────────────────────────────────────────────────────────────
+# Keep shared, reviewable editor config; ignore per-developer state.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+*.code-workspace
+
+# ── MSIX / installer / packaging artifacts ───────────────────────────────────────────────────────
+# The update/delivery channel (ADR 0008) produces these. None of them belongs in git: they are
+# large, they are generated, and the signing material must never be tracked at all.
+AppPackages/
+BundleArtifacts/
+*.appx
+*.appxbundle
+*.appxupload
+*.appinstaller
+*.msix
+*.msixbundle
+*.msixupload
+*.msi
+*.cab
+Package.StoreAssociation.xml
+_pkginfo.txt
+*.pfx
+*.p12
+*.snk
+*.cer
+*.publishsettings
+PublishProfiles/*.user
+
+# ── Windows / macOS shell debris ─────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ── Python (tools/coord, tools/doc-audit — stdlib-only, but the interpreter still litters) ───────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.python-version
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# ── Node (the doc/tooling side only; there is no web app in this repository today) ───────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ── Local, machine-specific, and secret ──────────────────────────────────────────────────────────
+# Rule: if it differs per machine or per person, it is ignored and a committed `*.example` file
+# documents its shape. A tracked file must be true on every machine.
+*.local
+*.local.json
+appsettings.Development.json
+appsettings.Local.json
+local.settings.json
+secrets.json
+.env
+.env.*
+!.env.example
+*.secrets.*
+!*.secrets.example.*

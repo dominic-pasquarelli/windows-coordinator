@@ -1,0 +1,32 @@
+#!/bin/sh
+# coord — the developer entry point for Windows Coordinator (POSIX launcher).
+#
+# Forwards everything to tools/coord/coord.py, resolved relative to THIS script rather than to the
+# current working directory, so `./coord`, `../windows-coordinator/coord` and a symlinked-onto-PATH
+# copy all behave the same.
+#
+# Stdlib-only Python 3.11+. No virtual environment, no pip install — if you find yourself creating
+# one for this repository, something has gone wrong. See tools/coord/README.md.
+#
+# The Windows counterpart is coord.cmd.
+
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script="$here/tools/coord/coord.py"
+
+if [ ! -f "$script" ]; then
+    echo "coord: cannot find $script" >&2
+    echo "       This launcher must sit at the repository root, next to tools/." >&2
+    exit 2
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$script" "$@"
+elif command -v python >/dev/null 2>&1; then
+    exec python "$script" "$@"
+else
+    echo "coord: no Python interpreter found on PATH (looked for python3, then python)." >&2
+    echo "       The tooling needs Python 3.11+; see docs/runbooks/dev-setup.md." >&2
+    exit 2
+fi

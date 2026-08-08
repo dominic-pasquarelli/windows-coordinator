@@ -1,0 +1,294 @@
+# Windows Coordinator — CI
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# WHAT THIS PIPELINE IS ALLOWED TO CLAIM — read this before trusting a green tick.
+#
+#   docs-audit     The documentation + modularity gate. It is stdlib-only Python 3.11 and needs no
+#                  .NET at all, so it RUNS TODAY, on every push, and it is the only job in this file
+#                  that is currently a real gate. A green run is a statement about *text*: links
+#                  resolve, frontmatter parses, the ADR sequence is intact, no Windows namespace
+#                  appears inside a Core project, docs/MAP.md is current. It is not a build.
+#
+#   core-tests     Windows-FREE logic ONLY, and this bounds it hard: it covers NO Shell adapter,
+#                  NO window placement, NO hotkey capture, NO DPI or scaling behavior, NO tray
+#                  presence, and NO UI. Those live behind P/Invoke and WinUI in the Shell adapters,
+#                  which are not unit-tested by design (ADR 0003). The ONLY source of a claim about
+#                  any of them is a human executing docs/runbooks/manual-validation.md on a real
+#                  Windows desktop and writing down what happened, on what machine, on what date.
+#                  A green core-tests is a statement about geometry math, schedule arithmetic,
+#                  arbitration decisions, and settings migration. Nothing a user can see.
+#
+#   windows-build  A compile check, and only a compile check. Compiling is not running, and running
+#                  is not working. See docs/OPERATING_MODEL.md §7 (the evidence standard) and its
+#                  three failure shapes — a check that cannot fail · a claim stronger than its
+#                  evidence · an error found after the expensive step.
+#
+# HONEST STATE OF THIS FILE (2026-08-08): no .NET SDK has ever been present in the environment this
+# repository was authored in. **No C# here has ever been compiled**, there is no solution file, and
+# neither .NET job below has ever executed. docs/NEXT.md owns restoring the toolchain, generating
+# the solution with `dotnet new sln`, and recording the first compile result — including a failure.
+# Until that has happened, the only line this pipeline earns is: "the documentation gate is green;
+# the C# is not compiled."
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # The gate that actually works today.
+  #
+  # It is deliberately the first job and deliberately has no .NET dependency: the whole point of
+  # keeping tools/doc-audit/ stdlib-only is that the documentation contract stays enforceable in
+  # every environment — a bare runner, a Linux laptop, the container this project was bootstrapped
+  # in. If this job goes red, something in the repository is unambiguously broken (a dead link, a
+  # dead path, invalid frontmatter, an ADR gap, a stale index, a Core project reaching for Win32).
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  docs-audit:
+    name: Docs audit (code ↔ docs drift + the modularity boundary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The closeout check diffs the branch against its base, so it needs real history.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Invoked directly rather than through `coord audit` on purpose: the launcher is a convenience
+      # for humans, and CI should exercise the checker itself with the fewest moving parts between
+      # the runner and the finding. `coord audit` is a thin wrapper over exactly this command.
+      #
+      # Exits non-zero on any ERROR-level finding. WARN and INFO are advisory and never fail — a
+      # gate that fires on judgement calls trains you to ignore it (docs/AUDIT.md §5).
+      - name: Mechanical drift check (fails on ERROR — see docs/AUDIT.md)
+        run: python3 tools/doc-audit/audit.py
+
+      # The generated doc index must equal a fresh regeneration. Generation is deterministic and
+      # carries no timestamps, so a difference here is always a real change in the doc set, never
+      # noise — which is what makes --check a gate rather than a flake.
+      - name: Doc index is current (docs/MAP.md)
+        run: python3 tools/doc-audit/genmap.py --check
+
+      # Report-only, by design. Staleness is driven by time and repo churn, so failing on it would
+      # block an unrelated PR after a quiet fortnight — friction that gets routed around rather than
+      # fixed. It surfaces the accuracy backlog in the log where an audit can pick it up.
+      - name: Accuracy backlog (advisory — docs overdue for an `audited` re-read)
+        run: python3 tools/doc-audit/audit.py --accuracy
+
+      # Branch closeout (DOC_SPEC §6): a doc changed on this branch must have bumped its `updated`
+      # flag. This is the check that stops a doc being edited into a lie and left carrying an old
+      # date that says "reviewed" when it was not.
+      - name: Closeout — changed docs must bump `updated`
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          python3 tools/doc-audit/audit.py --since "origin/${{ github.base_ref }}"
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Core tests — the portable half of the Core/Shell split (ADR 0003).
+  #
+  # These are plain net9.0 projects with zero Windows dependencies, which is exactly why they can
+  # run on an ubuntu runner and why running them here means anything at all. What they cover is
+  # narrow and stated again in the job name because it is the single most-blurred fact in this
+  # project: Core logic, and nothing a user can see.
+  #
+  # NOT COVERED HERE, AT ALL — and not covered anywhere else in this file either:
+  #   · the Shell adapters (P/Invoke, window handles, WinUI) — validated by hand, on purpose
+  #   · window placement, snapping, and multi-monitor arrangement
+  #   · hotkey capture, chord arbitration against the real OS, and hook-thread latency
+  #   · DPI and per-monitor scaling behavior
+  #   · the tray host, the settings UI, and settings survival across a restart
+  # Every one of those is docs/runbooks/manual-validation.md, performed by a human on a real Windows
+  # desktop, recorded with a machine and a date. There is no automated substitute and there is not
+  # meant to be one.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  core-tests:
+    name: Core tests (Windows-free logic only — no Shell, no placement, no hotkeys, no UI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      # ── The guard, and why it is shaped like this ────────────────────────────────────────────
+      # There are no test projects yet, because no module exists yet. Two tempting shapes are both
+      # wrong, and both are named failure shapes in docs/OPERATING_MODEL.md §7:
+      #
+      #   · running `dotnet test` anyway → a red X on every push that means "nothing is written
+      #     yet", which is not a finding. A gate that is permanently red is a gate nobody reads.
+      #   · `|| true`, or a bare `continue-on-error` → a job that CANNOT FAIL wearing the costume
+      #     of one that can. That is failure shape 1, and it is the worse of the two.
+      #
+      # So the skip is explicit, printed into the log and the run summary, and — critically — tied
+      # to a condition that will genuinely stop being true: a `.csproj` appearing under tests/.
+      # The guard can also FAIL: once a solution file exists, the bootstrap milestone has been
+      # passed, and a repository with a solution but no Core test project is a real defect, not an
+      # early state. That branch is what stops this from being decoration.
+      - name: Discover Core test projects
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          projects="$(find tests -name '*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' 2>/dev/null | sort || true)"
+          count="$(printf '%s\n' "$projects" | grep -c . || true)"
+          solution="$(find . -maxdepth 1 \( -name '*.sln' -o -name '*.slnx' \) | sort || true)"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+          if [ "$count" -gt 0 ]; then
+            echo "Found $count Core test project(s):"
+            printf '%s\n' "$projects"
+            { echo "### Core tests"; echo; echo "Running $count test project(s) under \`tests/\`."; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -n "$solution" ]; then
+            echo "::error title=Solution exists but no Core test projects::A solution file is present, so this repository is past bootstrap — but tests/ contains no .csproj. Core logic without a Core test is exactly the state the Core/Shell split exists to prevent (docs/MODULE_SPEC.md §6)."
+            exit 1
+          fi
+
+          echo "::notice title=Core tests skipped — nothing to run yet::No .csproj under tests/ and no solution file. No module exists (docs/NEXT.md), so there is no Core logic to test. This skip stops the moment a test project lands."
+          {
+            echo "### Core tests — SKIPPED (nothing to run)"
+            echo
+            echo "No \`.csproj\` under \`tests/\` and no solution file at the repository root."
+            echo "This is the honest bootstrap state, not a passing test run: **no C# in this"
+            echo "repository has ever been compiled.** The skip ends as soon as a Core test"
+            echo "project exists, and this job hard-fails if a solution appears without one."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Driven through the developer entry point on purpose, so CI and a human run the same code
+      # path. `coord test` itself refuses to report a vacuous pass when it finds no test projects —
+      # the discovery step above is what decides whether calling it is meaningful.
+      - name: Run the Core suites (`coord test`)
+        if: steps.discover.outputs.count != '0'
+        run: python3 tools/coord/coord.py test -c Release
+
+      - name: State plainly what a green run here does not cover
+        if: steps.discover.outputs.count != '0'
+        run: |
+          {
+            echo
+            echo "> Green means **Core logic only**. It is not a statement about window placement,"
+            echo "> hotkey capture, DPI behavior, the tray, or the UI. Those come from"
+            echo "> \`docs/runbooks/manual-validation.md\`, performed by a human, on a named machine,"
+            echo "> on a date."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Full-solution compile — the only job that can build the Windows-targeted half.
+  #
+  # The Shell adapters target net9.0-windows10.0.19041.0 and cannot restore on Linux at all (that is
+  # the split working as designed, not a broken checkout), so this is the one place the whole
+  # solution is exercised.
+  #
+  # THE GUARD, AND WHY IT IS NOT A VACUOUS PASS. There is no solution file in this repository yet:
+  # a .sln carries per-project GUIDs that could not be generated or verified where this was authored,
+  # so generating it on a Windows machine is the first task in docs/NEXT.md. Until then `dotnet
+  # build` has nothing to point at. A job that reds out for that reason reports a non-finding on
+  # every push; a job that swallows the failure is a check that cannot fail (docs/OPERATING_MODEL.md
+  # §7, failure shape 1), which is strictly worse because it looks like evidence.
+  #
+  # The resolution: detect the solution's absence EXPLICITLY, say so loudly in the log and the run
+  # summary, and skip only the build steps. The condition is not a permanent excuse — it stops being
+  # true the moment `dotnet new sln` is run and the result is committed, which is a scheduled,
+  # owned task with a name. And the guard has a failing branch of its own: if project files exist
+  # under src/ while no solution does, that is a real inconsistency and this job goes red for it.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  windows-build:
+    name: Windows build (full solution — compile only, never a behavior claim)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Detect the solution
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          solution="$(find . -maxdepth 1 \( -name '*.sln' -o -name '*.slnx' \) | sort | head -n 1 || true)"
+          projects="$(find src -name '*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' 2>/dev/null | sort || true)"
+          project_count="$(printf '%s\n' "$projects" | grep -c . || true)"
+
+          if [ -n "$solution" ]; then
+            echo "has_solution=true" >> "$GITHUB_OUTPUT"
+            echo "Found solution: $solution"
+
+            # THE REAL GATE. Once a solution exists, every project under src/ must be in it —
+            # a project silently missing from the solution builds for its author and for nobody
+            # else, and neither `coord build` nor this job would otherwise notice.
+            #
+            # This condition is deliberately FALSE today (there is no solution yet, TD-2), and it
+            # becomes checkable the moment one lands. That ordering is the point: a gate whose
+            # failing branch is unreachable is decoration, and a gate that is red on every push
+            # from day one is a gate nobody reads. This one is neither.
+            missing=""
+            while IFS= read -r proj; do
+              [ -n "$proj" ] || continue
+              name="$(basename "$proj")"
+              grep -qF "$name" "$solution" || missing="$missing $name"
+            done <<< "$projects"
+
+            if [ -n "$missing" ]; then
+              echo "::error title=Project missing from the solution::$solution does not include:$missing. Run 'dotnet sln add' for each and commit — a project outside the solution is not built by CI or by 'coord build'."
+              exit 1
+            fi
+
+            { echo "### Windows build"; echo; echo "Building \`$solution\` ($project_count project(s), all present in the solution)."; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "has_solution=false" >> "$GITHUB_OUTPUT"
+
+          echo "::notice title=Windows build skipped — no solution file yet::No .sln/.slnx at the repository root; $project_count .csproj exist under src/. Generating the solution on a Windows machine is the first task in docs/NEXT.md (TD-2). This skip ends the moment that lands."
+          {
+            echo "### Windows build — SKIPPED (no solution file)"
+            echo
+            echo "No \`.sln\`/\`.slnx\` at the repository root. **$project_count project file(s) DO"
+            echo "exist under \`src/\`** and are not yet tied together by a solution — that state is"
+            echo "deliberate and tracked as **TD-2** in \`docs/TECH_DEBT.md\`: a solution carries"
+            echo "per-project GUIDs that could not be generated in the environment this repository"
+            echo "was authored in (no .NET SDK)."
+            echo
+            echo "**This is not a passing build — nothing was compiled, and no C# in this repository"
+            echo "has ever been compiled anywhere.** Generating the solution on a real Windows"
+            echo "machine is the first task in \`docs/NEXT.md\`. From that commit onward this job"
+            echo "builds, and fails if any project under \`src/\` is missing from the solution."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Through the Windows launcher, so CI drives the same entry point a developer at the machine
+      # would (`coord.cmd` finds its own interpreter — `python`, then the `py` launcher).
+      - name: Build the solution (`coord build`)
+        if: steps.detect.outputs.has_solution == 'true'
+        run: .\coord.cmd build -c Release
+
+      # A compile is a compile. Say so where someone reading the run will see it, because "the
+      # Windows build is green" is the single easiest sentence in this project to over-read.
+      - name: State plainly what a green build here does not mean
+        if: steps.detect.outputs.has_solution == 'true'
+        shell: bash
+        run: |
+          {
+            echo
+            echo "> A green build proves the C# **compiles**. It does not prove the host starts, a"
+            echo "> hotkey registers, a window moves, the tray icon appears, or that anything"
+            echo "> survives a restart. Those are \`docs/runbooks/manual-validation.md\`, performed"
+            echo "> by a human on a real desktop, recorded with a machine and a date."
+          } >> "$GITHUB_STEP_SUMMARY"

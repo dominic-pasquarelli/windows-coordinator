@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Coordinator.Atlas.Core — the Core half of desktop spatial truth.
+
+    CORE project: `net9.0`, no Windows suffix, zero Windows dependencies. It holds the model of what
+    the desktop is — monitors, work areas, scaling, windows and their geometry — and the pure layout
+    math over it. It does not enumerate anything. Monitor and window enumeration, DPI queries, the
+    visible-bounds query and the position call belong to a Windows-targeted adapter project that
+    does not exist yet (docs/ATLAS.md §8 calls it Coordinator.Atlas.Shell).
+
+    This project is the sharpest demonstration of why the split exists (ADR 0003). The zone-rectangle
+    math in LayoutMath.cs is the hardest part of the first module to get right and the cheapest part
+    to verify: it is arithmetic over values, so it runs and is unit-tested on Linux, in a container,
+    with no monitor attached.
+
+    Note there is deliberately NO ProjectReference here. Atlas needs nothing from the platform:
+    geometry does not have capabilities, and adding a reference "for consistency" would be a
+    dependency with no consumer.
+
+    WARNING — NEVER COMPILED. No .NET SDK existed in the environment this was authored in.
+
+    Shared properties come from Directory.Build.props at the repository root.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Coordinator.Atlas</RootNamespace>
+    <AssemblyName>Coordinator.Atlas.Core</AssemblyName>
+    <Description>Windows Coordinator — Atlas (Core): the coherent desktop snapshot, coordinate-space-tagged geometry, and the pure zone-rectangle math. Contains no Windows types.</Description>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Coordinator.Platform.Core — the module membrane.
+
+    This is a CORE project: `net9.0`, no Windows suffix, zero Windows dependencies. It contains the
+    contract every module implements and consumes, and nothing that touches an operating system.
+    The `boundary` check in tools/doc-audit classifies a project as Core from this declared target
+    framework, so the absence of `-windows` here is load-bearing, not cosmetic (ADR 0003).
+
+    The Windows-facing half of the platform — the tray host, the WinUI Shell, the process-level DPI
+    declaration, the settings file location — belongs to a separate Windows-targeted project under
+    src/shell/, which does not exist yet.
+
+    WARNING — NEVER COMPILED. No .NET SDK existed in the environment this was authored in. This
+    project has never been restored, built, or referenced by anything.
+
+    Shared properties (LangVersion, Nullable, ImplicitUsings, TreatWarningsAsErrors, the version)
+    come from Directory.Build.props at the repository root. Do not repeat them here.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Coordinator.Platform</RootNamespace>
+    <AssemblyName>Coordinator.Platform.Core</AssemblyName>
+    <Description>The Windows Coordinator module membrane: module lifecycle, manifest, capability declarations, and versioned settings. Windows-free by contract.</Description>
+  </PropertyGroup>
+
+</Project>
