@@ -929,6 +929,35 @@ def check_inbox_recall(rep: Report) -> None:
                 "`Status: triaged → <where it landed>`, or prune it — git keeps the history")
 
 
+def check_projectref(rep: Report) -> None:
+    """Every `<ProjectReference Include="...">` must resolve to a file that exists.
+
+    A dangling ProjectReference is a build failure, but it is a build failure nobody sees until a
+    machine with an SDK gets to it — and this repository's whole premise is that useful checking
+    happens before that point. `check_boundary` reads the same elements and stays green on a broken
+    one, because a reference to a project that does not exist crosses no architectural boundary; it
+    just does not build. Those are different questions and they need different checks.
+
+    Earned 2026-08-08, on review: renaming the three Core projects to carry a `.Core` suffix updated
+    the one hand-written ProjectReference in the repository and missed the one that
+    `coord new-module` WRITES, so every module scaffolded from then on would have been born with a
+    reference to `Coordinator.Platform/Coordinator.Platform.csproj` — a path that no longer existed.
+    Two audits and four verifiers passed it. A generated artifact is code; this check plus the
+    scaffold test in tools/coord/tests/ is what makes that true mechanically.
+    """
+    for pr in _projects():
+        base = pr["path"].parent
+        for inc in pr["refs"]:
+            # MSBuild accepts backslashes on every platform; normalise before touching the disk.
+            target = (base / inc.replace("\\", "/")).resolve()
+            if target.exists():
+                continue
+            rep.add("error", "projectref", pr["rel"], None,
+                    f"references a project that does not exist: `{inc}`",
+                    f"fix the path (resolved to {_rel(target) if str(target).startswith(str(REPO_ROOT)) else target}) "
+                    "or add the missing project — this reference cannot build")
+
+
 CHECKS = [
     check_frontmatter,
     check_doc_link,
@@ -938,6 +967,7 @@ CHECKS = [
     check_adr_gap,
     check_adr_format,
     check_boundary,
+    check_projectref,
     check_shelving,
     check_accuracy,
     check_orphan,

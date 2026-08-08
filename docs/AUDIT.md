@@ -405,7 +405,7 @@ thing reachable. Nothing else checks that the promise held. This lens does.
       component that cannot be replaced while the tray host is resident, a version assumption baked
       into a settings file. *Settings migration:* has anything been built that an **additive** schema
       change could not extend — a positional array where a named field was needed, a value whose
-      meaning depends on its neighbors, a shape that forces a structural `Migrate()` for what should
+      meaning depends on its neighbors, a shape that forces a structural migration for what should
       have been a new optional field?
 - [ ] **Reserved seams still open.** For each reserved, planned, or trip-wired concept — a deferred
       pillar, a "leave this seam empty" decision, a recall hook, a stated forward-compat constraint —

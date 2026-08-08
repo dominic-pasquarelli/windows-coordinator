@@ -112,7 +112,7 @@ or a Windows namespace appearing in this directory an ERROR-level finding.
    them as strings on machines nobody is looking at, so a rename is a silently broken feature and a
    reuse points somebody's existing binding at a different behaviour.
 3. **Settings are additive by default.** A new field is read with a default, so yesterday's settings
-   still load. Structural changes bump the schema version and go through `Migrate()`, with a test
+   still load. Structural changes bump the schema version and ship an `ISettingsMigration`, with a test
    written first and observed failing before the migration is added. A reset is only ever explicit.
 
 ## Read order
@@ -160,10 +160,14 @@ it, so the code and this list cannot drift apart:
    §2.1 names the type `ModuleIdentity` and exposes it as `IModule.Identity`; the code here calls it
    `ModuleManifest` and exposes it as `IModule.Manifest`. Pick one, in the same session, and correct
    the loser — a spec that names a type the compiler has never seen is worse than no spec.
-2. **The `Migrate()` return type.** `IVersionedSettings.Migrate` returns the interface, so the
-   settings store has to cast back to the concrete type. A self-referential generic would type it
-   properly and would make every module's settings declaration harder to read. Decide it with a real
-   second module in front of you, not before.
+2. **~~The `Migrate()` return type.~~ Settled 2026-08-08 by
+   [ADR 0011](../../docs/decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md).**
+   The awkward return type is gone because the method is gone: migrating the *deserialized* object
+   could never perform the renames and reshapes migrations exist for, since the deserializer has
+   already discarded whatever the current type has no home for. Migrations now run on the persisted
+   `JsonObject` before binding, via `ISettingsMigration` and `SettingsMigrator`. What is left to do
+   here is not a decision but an implementation: there is no `ISettingsStore` implementation yet, so
+   nothing actually reads a file, chains the migrations and deserializes the result.
 3. **Which way the platform and the pillars depend on each other.** Today the pillars reference this
    project and it references neither of them, which keeps the graph acyclic — but
    [docs/MODULE_SPEC.md](../../docs/MODULE_SPEC.md) describes a context exposing desktop truth and

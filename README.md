@@ -262,7 +262,7 @@ Setup detail: [docs/runbooks/dev-setup.md](docs/runbooks/dev-setup.md).
 - **Capability ids are a permanent contract.** Settings and hotkey bindings reference them by name;
   renaming or reusing an id silently breaks a user's saved configuration.
 - **Settings changes are additive by default.** A new field must be readable with a default so old
-  settings still load. Structural changes need an explicit `Migrate()` and a version bump. A reset
+  settings still load. Structural changes need an explicit migration step and a version bump. A reset
   is only ever explicit.
 
 ---

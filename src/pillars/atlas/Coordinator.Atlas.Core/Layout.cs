@@ -67,7 +67,19 @@ public sealed record LayoutTemplate(
     string Name,
     IReadOnlyList<LayoutCell> Cells,
     int Padding = 0,
-    int Gap = 0);
+    int Gap = 0)
+{
+    /// <summary>
+    /// The cells, in declaration order. <b>Copied at construction</b> — an
+    /// <see cref="IReadOnlyList{T}"/> parameter promises only that this reference has no mutators,
+    /// not that the caller's underlying <c>List&lt;LayoutCell&gt;</c> has stopped changing. A
+    /// template whose cells can be edited after resolution would make an already-resolved
+    /// <see cref="ZoneSet"/> disagree with the template it says it came from.
+    /// </summary>
+    public IReadOnlyList<LayoutCell> Cells { get; } =
+        System.Collections.Immutable.ImmutableArray.CreateRange(
+            Cells ?? throw new ArgumentNullException(nameof(Cells)));
+}
 
 /// <summary>
 /// One resolved zone: a real rectangle, in a named coordinate space.
@@ -107,4 +119,15 @@ public sealed record ZoneSet(
     LayoutTemplate Template,
     Rect WorkArea,
     int TopologyGeneration,
-    IReadOnlyList<ZoneRect> Zones);
+    IReadOnlyList<ZoneRect> Zones)
+{
+    /// <summary>
+    /// The resolved rectangles, in template order. <b>Copied at construction</b>, for the same
+    /// reason as <see cref="LayoutTemplate.Cells"/>: a zone set is handed to a drag loop that will
+    /// hit-test against it on every mouse move, and geometry that can change underneath that loop
+    /// produces a window landing somewhere nobody chose.
+    /// </summary>
+    public IReadOnlyList<ZoneRect> Zones { get; } =
+        System.Collections.Immutable.ImmutableArray.CreateRange(
+            Zones ?? throw new ArgumentNullException(nameof(Zones)));
+}

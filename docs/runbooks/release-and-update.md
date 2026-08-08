@@ -74,7 +74,7 @@ likely early mistake, because it is invisible until an update goes sideways.
 | Number | Shape | Changes when | Referenced by |
 |---|---|---|---|
 | **Product version** | `MAJOR.MINOR.PATCH` | any release | the delivery manifest, the installer, the Shell's about surface, release records |
-| **Settings schema version** | a single integer | **only** when the settings shape changes | the settings file itself; drives `Migrate()` |
+| **Settings schema version** | a single integer | **only** when the settings shape changes | the settings file itself; drives the migration chain |
 | **Ids** — module ids, capability ids, trigger-intent ids | strings | **never** | settings files, user bindings, the update manifest |
 
 **One product version for the whole payload, including every module.** Modules do not version
@@ -86,7 +86,7 @@ problem this project does not have.
 **The settings schema version moves on its own clock**, and usually does not move at all. Additive
 changes — a new field read with a safe default — do **not** require a bump, which is the entire point
 of the additive-by-default rule ([principle 6](../COORDINATOR.md)). A **structural** change requires a
-bump plus an explicit `Migrate()` step plus a test that **fails without the migration**
+bump plus an explicit migration step plus a test that **fails without the migration**
 ([OPERATING_MODEL §7](../OPERATING_MODEL.md)).
 
 **Ids are permanent and are not versioned.** A capability id is referenced by a user's saved binding
@@ -207,7 +207,7 @@ Three rules that make S6 passable rather than lucky:
 
 - **Additive by default.** A new field is read with a safe default, so the old file still loads. This
   is free and should be the shape of nearly every change.
-- **Structural changes get a `Migrate()` and a test that fails without it.** Write the failing test
+- **Structural changes get a migration step and a test that fails without it.** Write the failing test
   first and watch it fail. A migration guard nobody has seen fail is a comment
   ([OPERATING_MODEL §7](../OPERATING_MODEL.md)).
 - **Back up before migrating.** Copy the settings file, with its schema version in the name, before
@@ -237,7 +237,7 @@ So:
 |---|---|
 | No schema change between the two versions | safe |
 | **Additive** change only | usually safe, but the new fields are lost on the first save by the old version — the user's newer configuration silently reverts |
-| **Structural** change with a `Migrate()` | **one-way**, unless a down-migration was deliberately written. Restore the pre-migration backup (§5) instead of trying to reverse it |
+| **Structural** change with a migration step | **one-way**, unless a down-migration was deliberately written. Restore the pre-migration backup (§5) instead of trying to reverse it |
 
 **The rule:** roll back the *binary* and restore the *matching settings backup*. Do not roll back the
 binary and keep migrated settings, and do not write a down-migration speculatively — write one only
@@ -295,7 +295,7 @@ together, in one ADR.
 [ ] manual-validation.md §5 "always" rows run (S1, S5, S6) — results recorded, skips named
 [ ] Conditional scenarios for whatever this release touched
 [ ] Product version decided; settings schema version bumped ONLY if the shape changed
-[ ] If the schema changed structurally: Migrate() written, and its test OBSERVED FAILING first
+[ ] If the schema changed structurally: migration step written, and its test OBSERVED FAILING first
 [ ] Release build produced; artifact carries version, commit, SDK, machine, hash (§3.2)
 [ ] Previous release's artifact retained for rollback (§6)
 [ ] Manifest written: version, artifact, hash, minimumFrom, notes (§4.1)
@@ -315,7 +315,7 @@ together, in one ADR.
 
 Commit:     <sha>
 Built on:   <machine>, SDK <version>, <packaged|unpackaged>, <signed|unsigned>
-Settings:   schema <n> (<unchanged | additive | structural + Migrate()>)
+Settings:   schema <n> (<unchanged | additive | structural + migration step>)
 Upgraded from: <previous version>  on  <machine(s)>
 
 Gate:       coord audit <n> error · coord test <n>/<n> (Linux) <n>/<n> (Windows)
@@ -353,7 +353,7 @@ install.
 ## See also
 
 - [COORDINATOR.md §4, §8](../COORDINATOR.md) — the update channel as a platform service, and the P5 gate.
-- [MODULE_SPEC.md §5](../MODULE_SPEC.md) — settings discipline and the `Migrate()` contract.
+- [MODULE_SPEC.md §5](../MODULE_SPEC.md) — settings discipline and the settings-migration contract.
 - [manual-validation.md](manual-validation.md) — **S6**, the acceptance scenario for this whole path.
 - [dev-setup.md](dev-setup.md) — producing a build in the first place; the deployment questions in §3.3.
 - [OPERATING_MODEL.md §3, §7](../OPERATING_MODEL.md) — why this is in the build-now set, and the

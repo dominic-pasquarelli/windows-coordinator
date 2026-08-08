@@ -283,16 +283,17 @@ def cmd_test(args) -> int:
         extra += ["--filter", args.filter]
     extra += ["-c", args.configuration]
 
-    sln = find_solution()
-    if sln and not names:
-        info(f"testing via {rel(sln)} ({len(projects)} test project(s) discovered under tests/)")
-        rc = run_cmd([dotnet, "test", str(sln), *extra], dry=args.dry_run)
-        if rc != EXIT_OK:
-            warn(f"dotnet test failed (exit {rc}) — the suites did NOT pass.")
-        return rc
-
-    if not sln:
-        warn("no solution file — running each discovered test project individually (TD-2).")
+    # ALWAYS run the discovered test projects individually — never `dotnet test <solution>`, even
+    # when a solution exists.
+    #
+    # The solution is the whole product: once the Shell adapters land it contains
+    # `net9.0-windows10.0.19041.0` projects, and handing it to `dotnet test` would drag those into
+    # the run. On the Linux CI runner that fails outright; on a Windows machine it quietly widens
+    # what a green `coord test` means, which is worse — the entire value of this command is that it
+    # is a claim about PORTABLE Core logic and nothing else (ADR 0003).
+    #
+    # Discovery under tests/ is therefore the definition of the Core-test set, and it stays
+    # independent of whatever the solution accumulates. Reported by review 2026-08-08.
     failures: list[str] = []
     for proj in projects:
         info(f"testing {rel(proj)}")
@@ -607,7 +608,7 @@ CORE_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\\..\\..\\platform\\Coordinator.Platform\\Coordinator.Platform.csproj" />
+    <ProjectReference Include="..\\..\\..\\platform\\Coordinator.Platform.Core\\Coordinator.Platform.Core.csproj" />
   </ItemGroup>
 
 </Project>

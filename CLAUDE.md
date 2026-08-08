@@ -123,8 +123,9 @@ cannot be retrofitted either.
 5. **Every capability is a named, typed binding target** — stable ids; settings and hotkey bindings
    reference them by name, so ids are a permanent contract.
 6. **Settings are the source of truth and survive updates** — versioned, additive-by-default (a new
-   field read with a default → old settings still load), explicit `Migrate()` for structural
-   changes. A reset is only ever explicit.
+   field read with a default → old settings still load), an explicit migration step
+   (`ISettingsMigration`, [ADR 0011](docs/decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md))
+   for structural changes. A reset is only ever explicit.
 7. **Resolve once, execute cheap** — parse, compile, and allocate at load or settings-save, never in
    a hook callback or a drag loop. Input hooks are on the UI's critical path; blocking one stalls
    the whole desktop.

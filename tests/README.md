@@ -23,12 +23,19 @@ related:
 > running [docs/runbooks/manual-validation.md](../docs/runbooks/manual-validation.md) on a real
 > Windows desktop, and from nowhere else.
 
-## Status: no test project exists
+## Status: two test projects exist; CI is the only thing that has ever run them
 
-There is no test project, no test, and no test run. There is also no compiler: the C# in this
-repository was authored in an environment with **no .NET SDK**, so nothing has ever been built, let
-alone tested (**TD-1** in [docs/TECH_DEBT.md](../docs/TECH_DEBT.md)). Nothing in this directory has
-produced a result of any kind.
+| Project | Covers |
+|---|---|
+| `Coordinator.Atlas.Core.Tests` | the zone arithmetic (the seam property, refusals, negative-origin monitors, gap/padding, hit-testing) and the coherent-snapshot immutability guarantee |
+| `Coordinator.Platform.Core.Tests` | the settings migration chain (rename, collection reshape, future-schema refusal, malformed-document refusal, chain integrity) and the capability invariants |
+
+**Nothing here has been compiled or run locally.** The authoring environment has no .NET SDK
+(**TD-1** in [docs/TECH_DEBT.md](../docs/TECH_DEBT.md)), so these tests were written without a
+compiler in the loop and every signature in them is a proposal until a run says otherwise.
+`.github/workflows/ci.yml` compiles every portable project and runs these suites on every push —
+**read the latest run and report what it returned.** A green tick there is a fact about that run,
+not a standing property of this directory.
 
 The Python tooling is the exception worth naming, because it is the one place this project currently
 has anything runnable: `coord audit` and `coord map` are stdlib-only Python and they execute against
@@ -129,23 +136,23 @@ code under test.
 
 ## Where to resume
 
-**Blocked on the toolchain.** No test can run until a `dotnet build` has succeeded once on a
-machine with the .NET 9 SDK — the Active focus in [docs/NEXT.md](../docs/NEXT.md).
+**Read the latest CI run first** — it is the only thing that has ever executed these suites.
 
-When that unblocks, the first action is the one that needs no Windows at all and proves the most:
+Then, on a machine with the .NET 9 SDK, the highest-value action is the one still outstanding:
 
-> Create `Coordinator.Atlas.Core.Tests`, and write the seam test first: for a two-cell template
-> split at 0.5, assert that the left zone's right edge **equals** the right zone's left edge, for a
-> table of work-area widths including odd ones. Because `LayoutMath.Resolve` is already written, the
-> test will go green on its first run and prove nothing — so substitute an implementation that
-> computes each zone's width independently and lays the zones end to end, watch the test catch the
-> one-pixel seam and overlap that independent rounding produces, and only then restore
-> `LayoutMath.Resolve` and confirm it passes.
+> **Watch the seam test fail.** `LayoutMathTests.AdjacentZonesShareAnExactEdgeAtEveryWidth` was
+> written *after* `LayoutMath.Resolve`, so it went green on its first run and therefore proved
+> nothing about itself. Substitute an implementation that computes each zone's width independently
+> and lays the zones end to end, confirm the test catches the one-pixel seam and overlap that
+> independent rounding produces, then restore `LayoutMath.Resolve`. Only then is that test evidence
+> rather than decoration.
+>
+> `IndependentlyRoundedWidthsWouldNotTileTheArea` is a partial stand-in — it proves the naive
+> arithmetic really does fail to tile the area — but it exercises a hand-written naive calculation,
+> not the real code path, so it is weaker than the substitution above and does not replace it.
 
-That single test is worth writing before any other because of what it establishes at once: that the
-test runner works on a non-Windows machine, that a Core project really is Windows-free, that the
-split earns its two-project cost, and that this project's first guard was observed failing before it
-was trusted. A guard nobody has seen fail is decoration.
+That is this project's operational rule applied to its own first test: **a guard nobody has seen
+fail is decoration** ([OPERATING_MODEL §7](../docs/OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean)).
 
 Only then widen: the rest of the geometry table, arbitration, schedule arithmetic, and the settings
 migration — and add the first row to the manual-validation runbook for everything the tests above

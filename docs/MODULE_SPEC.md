@@ -193,7 +193,7 @@ are permanent, labels are free.
 
 | Service | What you get | You do **not** write |
 |---|---|---|
-| **Settings** | typed load/save, version stamp, additive-by-default reads, an explicit `Migrate()` hook, validation against your `ValueSpec`s | file paths, serializer setup, backup/restore, "did the update wipe my settings" handling |
+| **Settings** | typed load/save, version stamp, additive-by-default reads, an explicit `ISettingsMigration` chain, validation against your `ValueSpec`s | file paths, serializer setup, backup/restore, "did the update wipe my settings" handling |
 | **Identity** | a permanent module id, independent of assembly name, path, or display name | any id scheme of your own |
 | **Logging & diagnostics** | a scoped logger, fault attribution by module, state visible in the Shell | log files, rotation, a crash handler |
 | **Update delivery** | your module ships in the host's update payload; settings survive by contract | an updater, a version check, a download path |
@@ -227,7 +227,7 @@ src/modules/<name>/
 │   ├── <Name>Module.cs                implements IModule
 │   ├── <Name>Capabilities.cs          CapabilityId constants + declarations
 │   ├── <Name>Triggers.cs              TriggerIntent declarations
-│   ├── <Name>Settings.cs              versioned settings record + Migrate()
+│   ├── <Name>Settings.cs              versioned settings record + migrations
 │   └── ...                            pure domain logic (geometry, state machines, scheduling)
 ├── Coordinator.<Name>.Shell/          net9.0-windows10.0.19041.0 — thin adapter
 │   ├── Coordinator.<Name>.Shell.csproj    (omit this project entirely if the module
@@ -289,7 +289,7 @@ discovery → construction → settings load → trigger registration → enable
 |---|---|---|
 | **Discovery** | the host finds registered module types | n/a — no module code runs |
 | **Construction** | the type is instantiated | **No I/O, no throwing.** A constructor that touches the disk delays startup for every module. |
-| **Settings load** | the store reads, validates, migrates; your typed settings are ready | platform-side; your `Migrate()` runs here and must be pure and fast |
+| **Settings load** | the store reads, validates, migrates; your typed settings are ready | platform-side; your migration chain runs here and must be pure and fast |
 | **Trigger registration** | Conduit arbitrates your declared intents and records outcomes | platform-side; you are told the results, you do not register |
 | **Enable** | `InitializeAsync` then `EnableAsync` | **Yes — I/O is allowed here.** This is the only place expensive setup belongs (principle 7). |
 | **Dispatch** | `HandleAsync` / `ApplyAsync` | **Not on the hook thread** — Conduit already moved off it. Still: do not block on network or slow disk; the user is waiting. |
@@ -307,7 +307,7 @@ you the new values and expects the expensive work to happen *there*, not on the 
 settings-save as a second enable.
 
 **Settings discipline** (COORDINATOR.md principle 6): additive fields read with a safe default so old
-settings still load; structural changes take an explicit `Migrate()` plus a version bump; a reset is
+settings still load; structural changes take an explicit migration step plus a version bump; a reset is
 only ever explicit. Adding a field is the default move — it is compatible in both directions and costs
 nothing. Restructuring is the exception and needs a migration with a test that **fails without it**.
 
@@ -324,7 +324,7 @@ What to test:
 
 - **Capability declarations** — every expected id appears, with the right kind and value spec.
 - **Apply** — setting a capability actually mutates state; a `Reading` is rejected.
-- **Settings** — round-trip, defaults for absent fields, and each `Migrate()` step, with a case that
+- **Settings** — round-trip, defaults for absent fields, and each `ISettingsMigration` step, with a case that
   fails if the migration is removed.
 - **The domain logic** — the geometry, the state machine, the schedule arithmetic. This is the part
   that will be wrong, and it is the part that is cheap to test.
@@ -433,7 +433,7 @@ reasoning at each step, is [recipes/add-a-module.md](recipes/add-a-module.md).
     [ ] <Name>Module.cs         implements IModule
     [ ] <Name>Capabilities.cs   ids declared as constants — they are permanent
     [ ] <Name>Triggers.cs       trigger intents; handle refusal
-    [ ] <Name>Settings.cs       versioned record, defaults for every field, Migrate()
+    [ ] <Name>Settings.cs       versioned record, defaults for every field, migrations
     [ ] the domain logic         pure, deps injected, no statics
 [ ] Shell project (only if the module needs a Windows surface):
     [ ] adapter — collect facts, call Core, carry out the answer; no decisions

@@ -160,6 +160,33 @@ public sealed record DesktopSnapshot(
     long CapturedAtTicks,
     int TopologyGeneration)
 {
+    /// <summary>The monitors in this snapshot. Copied at construction; see the remarks below.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Defensively copied, and that is the whole coherence guarantee.</b> The parameter type is
+    /// <see cref="IReadOnlyList{T}"/>, which says only that <i>this reference</i> offers no mutators
+    /// — it does not say the underlying object is immutable. A caller that builds a
+    /// <c>List&lt;MonitorInfo&gt;</c>, passes it here, and keeps its own reference can still add to
+    /// or clear it afterwards, and every holder of this "snapshot" would observe the change.
+    /// </para>
+    /// <para>
+    /// That would defeat the single reason this type exists. A snapshot is meant to be a coherent
+    /// instant that two modules can both read and agree about; a snapshot that can change under its
+    /// readers is just a shared mutable cache with a reassuring name — the exact thing
+    /// docs/ATLAS.md says a module must not keep. Copying into an
+    /// <see cref="System.Collections.Immutable.ImmutableArray{T}"/> at construction makes the
+    /// guarantee true rather than merely stated.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<MonitorInfo> Monitors { get; } =
+        System.Collections.Immutable.ImmutableArray.CreateRange(
+            Monitors ?? throw new ArgumentNullException(nameof(Monitors)));
+
+    /// <summary>The windows in this snapshot. Copied at construction, for the reason above.</summary>
+    public IReadOnlyList<WindowInfo> Windows { get; } =
+        System.Collections.Immutable.ImmutableArray.CreateRange(
+            Windows ?? throw new ArgumentNullException(nameof(Windows)));
+
     /// <summary>
     /// The primary monitor, or null if this snapshot contains none — which should be impossible on
     /// a real desktop and is therefore worth surfacing rather than assuming away.

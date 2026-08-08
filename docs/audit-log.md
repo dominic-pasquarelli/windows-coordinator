@@ -26,6 +26,83 @@ related:
 
 ---
 
+## 2026-08-08 — PR #1 external code review (human reviewer, seven findings)
+
+**Scope:** the whole bootstrap PR, reviewed by a human against the guarantees the documentation
+states. Every finding was confirmed against the code before it was acted on. This entry is worth
+reading before the bootstrap entry below it, because it corrects that entry's central claim.
+
+### The pattern worth remembering
+
+The bootstrap's own verification was **documentation-shaped**. Four adversarial verifiers hunted
+broken links, single-source violations, vocabulary leakage and overclaiming, and they were good at
+it — the entry below records four real defects they found in the project's own guards. **Not one of
+them asked whether the code did what its doc-comment promised**, because none of them could compile
+it. The human reviewer went straight at semantics and found seven things a compiler and a test would
+have surfaced on day one.
+
+The lesson is not "add another lens". It is that **an unverifiable artifact attracts verification of
+the things about it that *are* verifiable**, and that substitution is invisible from the inside.
+
+### Fixed this pass
+
+- 🔴 **CI never compiled anything, and did not have to be that way.** Both .NET jobs *skipped* the
+  build whenever no solution file existed — while `actions/setup-dotnet` installed a .NET 9 SDK three
+  lines above. A `.csproj` compiles perfectly well without a solution. The repository shipped an
+  elaborate, carefully-worded account of an unverified state when the verification had been available
+  the whole time. **Both jobs now compile every project on every push**; the Linux job additionally
+  runs the Core suites. *This is the finding that matters most on this page.*
+- 🔴 **`coord new-module` emitted a `ProjectReference` to a project that does not exist.** Renaming
+  the Core projects to carry a `.Core` suffix (this round) updated the one hand-written reference and
+  missed the one the generator *writes* — so every module scaffolded afterwards would have been born
+  unbuildable. Fixed, plus two new guards: a `projectref` ERROR check in `tools/doc-audit/audit.py`
+  (every `ProjectReference` must resolve) and `tools/coord/tests/test_scaffold.py`, which scaffolds a
+  module into a throwaway checkout and asserts its references resolve. **Both were A/B-proven against
+  the broken template before being trusted.** A generated file is code; nothing had ever run the
+  generator and looked at the output.
+- 🔴 **The settings migration API could not perform the migrations it existed for.**
+  `IVersionedSettings.Migrate(int)` ran on the *already-deserialized* current type, by which point the
+  deserializer has discarded every property the current type no longer declares — so a renamed field's
+  old value was gone before the migration could move it, and the doc-comment's own two examples were
+  exactly the two cases it could not do. Silent data loss, in the one artifact a user cannot
+  regenerate. Redesigned onto the persisted document
+  ([ADR 0011](decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)),
+  with tests for rename, collection reshape, future-schema refusal, malformed-document refusal and
+  chain integrity.
+- 🟠 **The coherent-snapshot guarantee was not enforced.** `DesktopSnapshot`, `LayoutTemplate` and
+  `ZoneSet` accepted `IReadOnlyList<T>` — which promises only that *that reference* has no mutators —
+  so a caller could keep its `List<T>` and mutate the "snapshot" afterwards. Now defensively copied,
+  with tests that mutate the caller's list and assert the value did not move.
+- 🟠 **`Capability` defaulted `Bindable` to `true` three lines below a comment saying a `Reading` is
+  never bindable.** Now rejected at construction. `Kind` and `Bindable` are get-only so a `with`
+  expression cannot rebuild the illegal state — a record's `with` runs the copy constructor and does
+  **not** re-run validating initializers, which would have left the hole open.
+- 🟠 **`coord test` ran `dotnet test <solution>` when a solution existed**, which would eventually
+  drag Windows-targeted Shell projects into the Linux Core-test job and silently widen what a green
+  run means. It now always runs discovered test projects individually.
+- 🟠 **`docs/NEXT.md` prescribed a sequence that guaranteed a red build** — generate a solution with
+  the three production projects, while CI fails a solution that has no test project. Reconciled: the
+  documented commands now include the two test projects, and the incoherent `coord test` step is
+  rewritten.
+
+### Health
+
+- `coord audit` **0 ERROR / 0 WARN / 0 INFO**; `coord map --check` clean.
+- `tools/coord/tests/` — **4 tests, passing**, and proven to fail against the defect they exist for.
+- **C#: still not compiled locally** (no SDK in the authoring environment). CI is now the first
+  compiler this project has ever had; the first run of the new jobs is the first compile in its
+  history. **Read the run — do not read this page — for whether it builds.**
+
+### Carry-forward
+
+Every `.cs` file, both pillar READMEs, `Directory.Build.props` and several docs carry a
+`NEVER COMPILED` banner. The moment a CI run is observed green those banners are false and must be
+replaced with what was actually observed — the run, the date, and what it does not cover. Tracked in
+[NEXT.md](NEXT.md) Active focus. A banner that overclaims in the *other* direction is the same defect
+mirrored.
+
+---
+
 ## 2026-08-08 — project bootstrap (AI-assisted authoring pass, owner-supervised)
 
 **Mechanical:** **run at closeout — the first real execution.** The checker

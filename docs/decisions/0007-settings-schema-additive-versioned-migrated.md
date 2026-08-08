@@ -1,7 +1,17 @@
 # ADR 0007 — Settings schema — additive by default, versioned, migrated
 
 Date: 2026-08-08
-Status: Accepted
+Status: Accepted · **Amended 2026-08-08 by [ADR 0011](0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)**
+
+> ⚠ **The policy below stands; the mechanism it names does not.** Everything this ADR decides about
+> *when* to migrate — additive by default, a version bump only for structural change, an explicit
+> step, a reset only ever explicit — is unchanged and still binding. What it got wrong is *where* the
+> migration runs. It specified a `Migrate()` method on the settings type, which receives an instance
+> the deserializer has already stripped of every property the current type no longer declares — so it
+> could not perform the renames and collection reshapes this ADR names as its own motivating
+> examples. [ADR 0011](0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)
+> replaces the mechanism with `ISettingsMigration` over the persisted document. Read `Migrate()`
+> below as "an explicit migration step", and 0011 for its shape.
 
 ## Context
 

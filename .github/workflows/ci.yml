@@ -9,7 +9,8 @@
 #                  resolve, frontmatter parses, the ADR sequence is intact, no Windows namespace
 #                  appears inside a Core project, docs/MAP.md is current. It is not a build.
 #
-#   core-tests     Windows-FREE logic ONLY, and this bounds it hard: it covers NO Shell adapter,
+#   core-tests     COMPILES every portable project and runs the Core suites. Windows-FREE logic
+#                  ONLY, and this bounds it hard: it covers NO Shell adapter,
 #                  NO window placement, NO hotkey capture, NO DPI or scaling behavior, NO tray
 #                  presence, and NO UI. Those live behind P/Invoke and WinUI in the Shell adapters,
 #                  which are not unit-tested by design (ADR 0003). The ONLY source of a claim about
@@ -23,12 +24,18 @@
 #                  three failure shapes — a check that cannot fail · a claim stronger than its
 #                  evidence · an error found after the expensive step.
 #
-# HONEST STATE OF THIS FILE (2026-08-08): no .NET SDK has ever been present in the environment this
-# repository was authored in. **No C# here has ever been compiled**, there is no solution file, and
-# neither .NET job below has ever executed. docs/NEXT.md owns restoring the toolchain, generating
-# the solution with `dotnet new sln`, and recording the first compile result — including a failure.
-# Until that has happened, the only line this pipeline earns is: "the documentation gate is green;
-# the C# is not compiled."
+# HONEST STATE OF THIS FILE (2026-08-08, second revision): no .NET SDK has ever been present in the
+# environment this repository is authored in, so nothing here has been compiled LOCALLY. Both .NET
+# jobs below now compile every project regardless — the first revision of this file skipped
+# compilation whenever no solution file existed, which meant the repository could ship indefinitely
+# having never run a compiler over its own C# while an SDK sat installed and idle in this very
+# pipeline. **The absence of a solution is not a reason to skip a build**: a `.csproj` compiles on
+# its own, and the solution (TD-2) is a tooling convenience, not a compiler prerequisite.
+#
+# So CI is now the first compiler this project has ever had, and the first run of these jobs is the
+# first compile in its history. Expect real errors; that is the point, and a red build here is
+# information rather than failure. Until a run is observed green, no document in this repository may
+# say the C# compiles — report what the run actually returned.
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -80,6 +87,13 @@ jobs:
       - name: Doc index is current (docs/MAP.md)
         run: python3 tools/doc-audit/genmap.py --check
 
+      # The scaffold generates .csproj files, and a generated file is code. This suite creates a
+      # module in a throwaway checkout and asserts every reference it produced resolves — the check
+      # that was missing when a project rename broke `coord new-module` and two audits plus four
+      # verifiers all passed it. Stdlib unittest, no .NET needed.
+      - name: Tooling tests (`coord new-module` produces references that resolve)
+        run: python3 -m unittest discover -s tools/coord/tests -v
+
       # Report-only, by design. Staleness is driven by time and repo churn, so failing on it would
       # block an unrelated PR after a quiet fortnight — friction that gets routed around rather than
       # fixed. It surfaces the accuracy backlog in the log where an audit can pick it up.
@@ -115,7 +129,7 @@ jobs:
   # meant to be one.
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   core-tests:
-    name: Core tests (Windows-free logic only — no Shell, no placement, no hotkeys, no UI)
+    name: Core build + tests (Windows-free logic only — no Shell, no placement, no hotkeys, no UI)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,20 +138,69 @@ jobs:
         with:
           dotnet-version: "9.0.x"
 
-      # ── The guard, and why it is shaped like this ────────────────────────────────────────────
-      # There are no test projects yet, because no module exists yet. Two tempting shapes are both
-      # wrong, and both are named failure shapes in docs/OPERATING_MODEL.md §7:
+      # ── Compile everything portable. No solution required. ──────────────────────────────────
       #
-      #   · running `dotnet test` anyway → a red X on every push that means "nothing is written
-      #     yet", which is not a finding. A gate that is permanently red is a gate nobody reads.
-      #   · `|| true`, or a bare `continue-on-error` → a job that CANNOT FAIL wearing the costume
-      #     of one that can. That is failure shape 1, and it is the worse of the two.
+      # This job used to SKIP compilation whenever no solution file existed, and that was wrong in
+      # a way worth recording: the absence of a `.sln` does not prevent compiling anything. A
+      # `.csproj` builds perfectly well on its own. The repository shipped its first PR having
+      # never once run a compiler over its own C#, while a .NET 9 SDK sat installed and idle three
+      # lines above — an elaborate, carefully-worded account of an unverified state, when the
+      # verification was available the whole time. Reported by review 2026-08-08.
       #
-      # So the skip is explicit, printed into the log and the run summary, and — critically — tied
-      # to a condition that will genuinely stop being true: a `.csproj` appearing under tests/.
-      # The guard can also FAIL: once a solution file exists, the bootstrap milestone has been
-      # passed, and a repository with a solution but no Core test project is a real defect, not an
-      # early state. That branch is what stops this from being decoration.
+      # A Core project is `net9.0` with no `-windows` in its target framework, which is exactly
+      # what makes it buildable here (ADR 0003). The Shell adapters cannot restore on Linux at all;
+      # those belong to the windows-build job. Discovery is by declared TargetFramework rather than
+      # by a hardcoded list, so a new pillar or module is covered the day it appears.
+      - name: Discover and build every portable project
+        id: portable
+        shell: bash
+        run: |
+          set -euo pipefail
+          portable=""
+          while IFS= read -r proj; do
+            [ -n "$proj" ] || continue
+            tfm="$(grep -o '<TargetFramework[s]*>[^<]*<' "$proj" | head -n1 | sed 's/<[^>]*>//g' || true)"
+            case "$tfm" in
+              *-windows*) echo "skip (Windows-targeted): $proj  [$tfm]" ;;
+              "")         echo "::warning title=No TargetFramework::$proj declares no TargetFramework; not built here." ;;
+              *)          echo "portable: $proj  [$tfm]"; portable="$portable$proj"$'\n' ;;
+            esac
+          done < <(find src tests -name '*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' 2>/dev/null | sort)
+
+          count="$(printf '%s' "$portable" | grep -c . || true)"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+          # Guard the guard. If discovery ever matches nothing, every build below is skipped and
+          # this job goes green having compiled nothing — the exact vacuous pass this project
+          # names as failure shape 1. There are portable projects in this repository; zero means
+          # discovery broke, not that there is nothing to do.
+          if [ "$count" -eq 0 ]; then
+            echo "::error title=No portable projects found::Discovery matched no net9.0 project under src/ or tests/. That is not an empty repository — it is a broken discovery step, and letting it pass would be a green job that compiled nothing."
+            exit 1
+          fi
+
+          echo "Building $count portable project(s)."
+          failed=0
+          while IFS= read -r proj; do
+            [ -n "$proj" ] || continue
+            echo "::group::dotnet build $proj"
+            if ! dotnet build "$proj" -c Release --nologo; then
+              echo "::error title=Build failed::$proj"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(printf '%s' "$portable")
+
+          [ "$failed" -eq 0 ] || exit 1
+
+          {
+            echo "### Core build"
+            echo
+            echo "Compiled **$count portable project(s)** on Linux with no solution file — a"
+            echo "\`.csproj\` does not need one. This is a compile, and nothing more: it says"
+            echo "nothing about behaviour."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Discover Core test projects
         id: discover
         shell: bash
@@ -145,40 +208,27 @@ jobs:
           set -euo pipefail
           projects="$(find tests -name '*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' 2>/dev/null | sort || true)"
           count="$(printf '%s\n' "$projects" | grep -c . || true)"
-          solution="$(find . -maxdepth 1 \( -name '*.sln' -o -name '*.slnx' \) | sort || true)"
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
-          if [ "$count" -gt 0 ]; then
-            echo "Found $count Core test project(s):"
-            printf '%s\n' "$projects"
-            { echo "### Core tests"; echo; echo "Running $count test project(s) under \`tests/\`."; } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          if [ -n "$solution" ]; then
-            echo "::error title=Solution exists but no Core test projects::A solution file is present, so this repository is past bootstrap — but tests/ contains no .csproj. Core logic without a Core test is exactly the state the Core/Shell split exists to prevent (docs/MODULE_SPEC.md §6)."
+          # Core logic with no Core test is the state the Core/Shell split exists to prevent
+          # (docs/MODULE_SPEC.md §6). Now that portable projects are compiled above, "there is
+          # Core code but nothing tests it" is always a real finding — there is no bootstrap
+          # window in which it is acceptable.
+          if [ "$count" -eq 0 ]; then
+            echo "::error title=No Core test projects::Portable projects exist and compile, but tests/ contains no .csproj. Core logic without a Core test is exactly what the Core/Shell split exists to prevent (docs/MODULE_SPEC.md §6)."
             exit 1
           fi
 
-          echo "::notice title=Core tests skipped — nothing to run yet::No .csproj under tests/ and no solution file. No module exists (docs/NEXT.md), so there is no Core logic to test. This skip stops the moment a test project lands."
-          {
-            echo "### Core tests — SKIPPED (nothing to run)"
-            echo
-            echo "No \`.csproj\` under \`tests/\` and no solution file at the repository root."
-            echo "This is the honest bootstrap state, not a passing test run: **no C# in this"
-            echo "repository has ever been compiled.** The skip ends as soon as a Core test"
-            echo "project exists, and this job hard-fails if a solution appears without one."
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Found $count Core test project(s):"
+          printf '%s\n' "$projects"
 
       # Driven through the developer entry point on purpose, so CI and a human run the same code
-      # path. `coord test` itself refuses to report a vacuous pass when it finds no test projects —
-      # the discovery step above is what decides whether calling it is meaningful.
+      # path. `coord test` runs each discovered test project individually — never the solution —
+      # so this job's meaning cannot widen as Windows projects are added.
       - name: Run the Core suites (`coord test`)
-        if: steps.discover.outputs.count != '0'
         run: python3 tools/coord/coord.py test -c Release
 
       - name: State plainly what a green run here does not cover
-        if: steps.discover.outputs.count != '0'
         run: |
           {
             echo
@@ -218,7 +268,7 @@ jobs:
         with:
           dotnet-version: "9.0.x"
 
-      - name: Detect the solution
+      - name: Detect the solution, or build every project directly
         id: detect
         shell: bash
         run: |
@@ -257,20 +307,41 @@ jobs:
 
           echo "has_solution=false" >> "$GITHUB_OUTPUT"
 
-          echo "::notice title=Windows build skipped — no solution file yet::No .sln/.slnx at the repository root; $project_count .csproj exist under src/. Generating the solution on a Windows machine is the first task in docs/NEXT.md (TD-2). This skip ends the moment that lands."
+          # NO SOLUTION IS NOT A REASON TO SKIP COMPILING. A `.csproj` builds on its own; the
+          # solution is a convenience for tooling, not a prerequisite for a compiler. This job
+          # previously skipped the whole build whenever the solution was absent, which meant the
+          # Windows-targeted half could go unbuilt indefinitely behind a well-worded notice.
+          # Reported by review 2026-08-08.
+          if [ "$project_count" -eq 0 ]; then
+            echo "::error title=No projects found::Discovery matched no .csproj under src/. That is a broken discovery step, not an empty repository."
+            exit 1
+          fi
+
+          echo "::notice title=No solution file — building each project individually::No .sln/.slnx at the repository root (TD-2); building all $project_count project(s) under src/ directly."
+          failed=0
+          while IFS= read -r proj; do
+            [ -n "$proj" ] || continue
+            echo "::group::dotnet build $proj"
+            if ! dotnet build "$proj" -c Release --nologo; then
+              echo "::error title=Build failed::$proj"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done <<< "$projects"
+
+          [ "$failed" -eq 0 ] || exit 1
+
           {
-            echo "### Windows build — SKIPPED (no solution file)"
+            echo "### Windows build — every project, no solution"
             echo
-            echo "No \`.sln\`/\`.slnx\` at the repository root. **$project_count project file(s) DO"
-            echo "exist under \`src/\`** and are not yet tied together by a solution — that state is"
-            echo "deliberate and tracked as **TD-2** in \`docs/TECH_DEBT.md\`: a solution carries"
-            echo "per-project GUIDs that could not be generated in the environment this repository"
-            echo "was authored in (no .NET SDK)."
+            echo "Compiled **$project_count project(s)** under \`src/\` individually. There is no"
+            echo "\`.sln\`/\`.slnx\` at the repository root yet — tracked as **TD-2**, because a"
+            echo "solution carries per-project GUIDs that could not be generated where this"
+            echo "repository was authored. That is a tooling convenience, not a compiler"
+            echo "prerequisite, so it is no longer a reason to leave the C# unbuilt."
             echo
-            echo "**This is not a passing build — nothing was compiled, and no C# in this repository"
-            echo "has ever been compiled anywhere.** Generating the solution on a real Windows"
-            echo "machine is the first task in \`docs/NEXT.md\`. From that commit onward this job"
-            echo "builds, and fails if any project under \`src/\` is missing from the solution."
+            echo "**A compile is a compile.** It says nothing about the tray, window placement,"
+            echo "hotkey capture, DPI behaviour, or the UI."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Through the Windows launcher, so CI drives the same entry point a developer at the machine

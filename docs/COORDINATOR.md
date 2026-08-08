@@ -177,7 +177,7 @@ the module-facing shapes are specified in [MODULE_SPEC.md](MODULE_SPEC.md).
 |---|---|---|
 | **Module host & lifecycle** | discovery, construction, ordered enable/disable, supervised dispatch | the phases run in a fixed order (§6); a module is never dispatched before enable or after disable |
 | **Module registry & stable identity** | a permanent module id, independent of assembly name, file path, or display name | the id survives renames, moves, and reinstalls; settings and bindings key on it |
-| **Settings** | typed load/save, versioning, additive-by-default schema, explicit `Migrate()` | settings survive an update; a reset only ever happens because someone asked for one |
+| **Settings** | typed load/save, versioning, additive-by-default schema, an explicit `ISettingsMigration` chain | settings survive an update; a reset only ever happens because someone asked for one |
 | **Update / delivery channel** | the module ships inside the host's update payload; no per-module updater | a module written today can be changed tomorrow on an install that already exists |
 | **Logging & diagnostics** | a scoped logger, a crash/fault record, module state visible in the Shell | a fault is attributable to a module by name, not to "the app" |
 | **The Shell (settings UI)** | a hosted settings page rendered from the module's declared capabilities | a module with no custom UI at all is still fully configurable |
@@ -291,7 +291,7 @@ restate it. Changing a principle means editing it here and recording an ADR.
 5. **Every capability is a named, typed binding target** — stable ids; settings and hotkey bindings
    reference them by name, so ids are a permanent contract.
 6. **Settings are the source of truth and survive updates** — versioned, additive-by-default (a new
-   field read with a default → old settings still load), explicit `Migrate()` for structural changes.
+   field read with a default → old settings still load), an explicit migration step (`ISettingsMigration`) for structural changes.
    A reset is only ever explicit.
 7. **Resolve once, execute cheap** — parse, compile, and allocate at load or settings-save, never in a
    hook callback or a drag loop. Input hooks are on the UI's critical path; blocking one stalls the
@@ -369,7 +369,7 @@ machine-sleep resume; notification behavior validated manually and recorded.
 Turn the seam built in P1 into a working path: package, deliver, install over an existing install.
 
 **Gate:** an update installs over a previous install on a real machine; settings written by the old
-version load in the new one; a deliberate structural settings change exercises `Migrate()` end to end
+version load in the new one; a deliberate structural settings change exercises the migration chain end to end
 with a test that **fails without the migration**; the procedure is recorded in
 `docs/runbooks/release-and-update.md`.
 

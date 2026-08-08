@@ -79,7 +79,7 @@ src/modules/<name>/
 │   ├── <Name>Module.cs                implements IModule
 │   ├── <Name>Capabilities.cs          CapabilityId constants + declarations
 │   ├── <Name>Triggers.cs              TriggerIntent declarations
-│   └── <Name>Settings.cs              versioned settings record + Migrate()
+│   └── <Name>Settings.cs              versioned settings record + migrations
 ├── Coordinator.<Name>.Shell/          net9.0-windows10.0.19041.0 — thin adapter
 │   └── Coordinator.<Name>.Shell.csproj    (delete this project if the module needs no
 │                                           Windows surface of its own)
@@ -250,7 +250,7 @@ public sealed record ZonesSettings
 **Additive is the default move.** A new field read with a safe default means the old settings file
 still loads, in both directions, for free. Reach for that shape first, every time.
 
-**A structural change needs an explicit `Migrate()` and a version bump — and a test that fails without
+**A structural change needs an explicit migration step and a version bump — and a test that fails without
 the migration.** Write the failing test first and watch it go red. A migration guard nobody has seen
 fail is a comment, not a guard ([OPERATING_MODEL §7](../OPERATING_MODEL.md)).
 
@@ -378,7 +378,7 @@ src/modules/<name>/
 │   │                                  Initialize/Enable/Handle/Apply/Disable
 │   ├── <Name>Capabilities.cs          permanent ids + ValueSpecs
 │   ├── <Name>Triggers.cs              intent declarations; refusal handled
-│   ├── <Name>Settings.cs              versioned record, defaults, Migrate()
+│   ├── <Name>Settings.cs              versioned record, defaults, migrations
 │   └── <domain>.cs                    the pure logic — the reason the module exists
 ├── Coordinator.<Name>.Shell/          net9.0-windows10.0.19041.0 — thin, dull
 │   ├── Coordinator.<Name>.Shell.csproj

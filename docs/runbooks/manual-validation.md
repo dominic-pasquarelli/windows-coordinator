@@ -402,7 +402,7 @@ defaults. Change a layout, bind a non-default chord, set a module option away fr
    "mostly." Every one.
 5. If the newer build made an **additive** change (a new field), confirm the old file loaded and the
    new field took its default → **expect:** no error, no reset, no prompt.
-6. If the newer build made a **structural** change, confirm `Migrate()` ran → **expect:** the schema
+6. If the newer build made a **structural** change, confirm the migration chain ran → **expect:** the schema
    version advanced and the old values are represented correctly in the new shape. The migration must
    have a Core test that **fails without the migration** — verify that test exists and has been
    observed failing ([OPERATING_MODEL §7](../OPERATING_MODEL.md)).

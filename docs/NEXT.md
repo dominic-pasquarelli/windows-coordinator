@@ -61,13 +61,21 @@ it, and the gate now stands at **0 ERROR**. The same closeout found and fixed fo
 guards themselves; they are written up in [audit-log.md](audit-log.md) and are the most useful thing
 on that page.
 
-**What exists and is not verified at all.** A C# skeleton — project files and contract interfaces
-for the platform core and the two pillars — is **written and has never been compiled.** The
-bootstrap ran in a Linux container with **no .NET SDK present**, so not one line of C# has been
-through a compiler, a linter, or a test runner. The correct phrasing everywhere in this repository is
-**"not compiled."** Never "builds," never "works," never "passes." That is
-[OPERATING_MODEL §7](OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean),
-and it is the spine of the project, not a caveat.
+**What exists, and what verifies it.** A C# skeleton — project files and contract interfaces for the
+platform core and the two pillars — plus two Core test projects covering the layout arithmetic, the
+snapshot immutability guarantee, the settings migration chain, and the capability invariants. **None
+of it has been compiled locally**, because the authoring container has no .NET SDK; the correct
+phrasing for anything not yet observed is **"not compiled"** — never "builds," never "works"
+([OPERATING_MODEL §7](OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean)).
+
+**But CI is now the compiler, and that is new as of the review round on 2026-08-08.** The first
+revision of [`ci.yml`](../.github/workflows/ci.yml) *skipped* both .NET jobs whenever no solution
+file existed — so the repository could ship indefinitely having never run a compiler over its own
+C#, while a .NET 9 SDK sat installed and idle in that very pipeline. **The absence of a solution
+never prevented compiling anything: a `.csproj` builds on its own.** Both jobs now compile every
+project on every push, and the Linux job runs the Core suites. So the honest statement is no longer
+"nothing has been compiled" — it is **"read the latest CI run and report what it returned."** If you
+are resuming and the run was green, say so with the date; if it was red, the errors are the work.
 
 **What does not exist.** There is **no module.** Zones and Chrono are roadmap entries with a
 directory-level plan and nothing more — deliberately not scaffolded, because an empty directory is a
@@ -102,9 +110,16 @@ project has ever received is the one you are about to generate.
 DETOUR: <where work stopped>` — and clears it on snap-back. Mode 3 of the snapshot protocol in
 [../CLAUDE.md](../CLAUDE.md). If you see one, start there instead.)*
 
-**One action, on a Windows machine with the .NET 9 SDK installed.** Everything else on this page is
-blocked behind it, because until it happens the repository contains exactly one unverified claim
-repeated in a dozen places.
+**First, read the latest CI run** — it compiles every portable project and runs the Core suites, so
+it, not this page, is the current truth about whether the C# builds. Then do the rest **on a Windows
+machine with the .NET 9 SDK installed**: the solution, the Windows-targeted half, and everything a
+Linux runner structurally cannot reach.
+
+**A standing chore this round created:** every `.cs` file, both pillar READMEs, `Directory.Build.props`
+and several docs still carry a `NEVER COMPILED` banner. The moment a CI run is observed green, those
+banners become false and must be replaced with what was actually observed — the run, the date, and
+what it does *not* cover. Do not delete them wholesale; a banner that overclaims in the other
+direction is the same defect mirrored.
 
 Setup detail is in [runbooks/dev-setup.md](runbooks/dev-setup.md). The sequence:
 
@@ -121,7 +136,15 @@ Setup detail is in [runbooks/dev-setup.md](runbooks/dev-setup.md). The sequence:
    dotnet sln add src/platform/Coordinator.Platform.Core/Coordinator.Platform.Core.csproj
    dotnet sln add src/pillars/conduit/Coordinator.Conduit.Core/Coordinator.Conduit.Core.csproj
    dotnet sln add src/pillars/atlas/Coordinator.Atlas.Core/Coordinator.Atlas.Core.csproj
+   dotnet sln add tests/Coordinator.Platform.Core.Tests/Coordinator.Platform.Core.Tests.csproj
+   dotnet sln add tests/Coordinator.Atlas.Core.Tests/Coordinator.Atlas.Core.Tests.csproj
    ```
+
+   **The test projects are in that list on purpose, and leaving them out breaks CI.** The
+   `windows-build` job fails when a solution exists that omits a project under `src/`, and the
+   `core-tests` job fails when portable code exists with no test project — so a solution containing
+   only the three production projects would be a guaranteed red build. An earlier revision of this
+   page prescribed exactly that; it was caught in review before anyone ran it.
 
    Every project name carries the **`.Core`** suffix because each one will eventually sit beside a
    `.Shell` adapter of the same stem — `Coordinator.Atlas.Core` / `Coordinator.Atlas.Shell` — which
@@ -130,9 +153,14 @@ Setup detail is in [runbooks/dev-setup.md](runbooks/dev-setup.md). The sequence:
    The C# **namespaces** do not carry the suffix: the assembly is `Coordinator.Atlas.Core`, the
    namespace is `Coordinator.Atlas`. **No `.Shell` project exists yet** — `src/shell/` holds a README
    and nothing else — so do not go looking for one to add. Commit the `.sln`. This closes **TD-2**.
-3. **`coord build`** — the first compile in this project's history. Expect errors.
-4. **`coord test`** — the Core test projects. Expect the test projects themselves to need work
-   before they run at all.
+3. **`coord build`** — the first compile of the **whole** solution, including anything
+   Windows-targeted. CI already compiles the portable half on every push, so read the latest run
+   first: if it is green, the errors you are hunting here are Windows-specific, which is a much
+   smaller search than "everything".
+4. **`coord test`** — the Core suites, locally. `coord test` deliberately runs each discovered test
+   project individually rather than the solution, so that its meaning cannot widen as `.Shell`
+   projects are added to the solution later; a green run here is a claim about portable logic and
+   nothing else.
 5. **Fix what the compiler surfaces**, smallest change first, without redesigning anything. If a
    fix requires a decision with trade-offs, write an ADR rather than deciding it silently in a
    commit message.
@@ -170,7 +198,7 @@ Ordered, with the evidence that closes each step. The canonical phase gates live
    (retrofit-expensive — see the table in
    [OPERATING_MODEL §3](OPERATING_MODEL.md#3-capture-is-free-building-costs)); a module that throws
    on load must be isolated so the host and the other modules survive (principle 12).
-4. **The settings store.** Versioned, additive-by-default, with an explicit `Migrate()` path. Write
+4. **The settings store.** Versioned, additive-by-default, with an explicit `ISettingsMigration` chain (ADR 0011). Write
    the migration test **before** the migration and watch it fail — a migration guard that has never
    been observed to fail is a comment.
 5. **One no-op reference module, end to end.** Loaded by the host, listed in the Shell, its settings
@@ -272,7 +300,7 @@ decision, it is an oversight — this table is what keeps the difference honest
 | **CI covers more than Core** | a Shell-adapter regression escapes to a real desktop that CI could plausibly have caught (**TD-4**). Then price a Windows runner against the pain. | `.github/workflows/ci.yml` + TECH_DEBT |
 | **The boundary check needs real teeth** | it reads **source text**, not a compiled assembly graph, so it is defeated by reflection, an inline fully-qualified type name, a source generator, or a package that transitively drags Windows types in — a green result is evidence, not proof. Bring it back when a Core project legitimately needs a Windows type, when someone works around it in one of those ways, **or the first moment a compiler exists** — from then on a Roslyn or assembly-reference check can enforce the rule against what actually builds, with the text check kept as the fast pre-build pass. See the boundary-check rows in [TECH_DEBT.md](TECH_DEBT.md) (**TD-3**). | `tools/doc-audit/audit.py` + an ADR if the rule changes; **prove the replacement fails without the fix** before trusting it |
 | **MODULE_SPEC gets its first real validation** | Zones is implemented (**TD-5**). Until a module nobody wrote against the spec has been built from it, the spec is a hypothesis. | [MODULE_SPEC.md](MODULE_SPEC.md), revised against reality |
-| **Settings schema needs a structural change** | any change that is not a new field read with a default. Additive is free; structural needs `Migrate()` plus a test that fails without it. | an ADR + the migration test |
+| **Settings schema needs a structural change** | any change that is not a new field read with a default. Additive is free; structural needs an `ISettingsMigration` step plus a test that fails without it. | an ADR + the migration test |
 | **Performance becomes a topic** | the resident process is measurably annoying — memory, idle CPU, or a hook callback that stalls the desktop. Measure before optimizing; there is no baseline yet. | a runbook with real numbers |
 
 ---

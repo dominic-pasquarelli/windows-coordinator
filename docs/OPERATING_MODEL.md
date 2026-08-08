@@ -114,7 +114,7 @@ running on a machine you are not sitting at:
 |---|---|
 | **Update / delivery channel** | It is the pipe every deferred feature later travels through. Without it, "we can add that later" is a promise the architecture cannot keep — the install freezes at whatever version was copied onto the machine. |
 | **Module identity** | Stable ids are what settings, hotkey bindings, and update manifests reference. Renaming identity after installs exist orphans every binding that pointed at the old name. |
-| **Settings migration** | A user's settings file is the one artifact you cannot regenerate. If versioning and `Migrate()` are not there from the first release, the only upgrade path is a reset — which destroys the one thing the user actually owns. |
+| **Settings migration** | A user's settings file is the one artifact you cannot regenerate. If versioning and a migration mechanism are not there from the first release, the only upgrade path is a reset — which destroys the one thing the user actually owns. |
 | **Trigger arbitration** | Once two modules own raw input hooks directly, centralizing conflict resolution means rewriting both. Conduit must own registration from the start or it never can. |
 
 Those four get built now. Everything else is a seam you deliberately leave **empty**, plus a recall

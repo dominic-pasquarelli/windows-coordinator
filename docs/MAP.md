@@ -82,7 +82,7 @@ related:
 
 ## Decisions (ADRs)
 
-The unified decision log (10 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
+The unified decision log (11 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
 
 - [ADR 0001 — Adopt the Axon documentation and operating protocols](decisions/0001-adopt-the-axon-documentation-and-operating-protocols.md)
 - [ADR 0002 — C# / .NET 9 and WinUI 3 as the stack](decisions/0002-csharp-dotnet9-and-winui3-as-the-stack.md)
@@ -94,3 +94,4 @@ The unified decision log (10 ADRs) — [docs/decisions/](decisions/). Splitting 
 - [ADR 0008 — The update / delivery channel is built now](decisions/0008-the-update-delivery-channel-is-built-now.md)
 - [ADR 0009 — Plain descriptive module names (a deliberate departure from Axon's codenames)](decisions/0009-plain-descriptive-module-names.md)
 - [ADR 0010 — `coord` as the single developer entry point](decisions/0010-coord-as-the-single-developer-entry-point.md)
+- [ADR 0011 — Settings migrations run on the persisted document, not the deserialized object](decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)

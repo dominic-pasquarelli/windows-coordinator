@@ -96,10 +96,70 @@ public enum CapabilityKind
 /// </param>
 /// <param name="Bindable">
 /// Whether this capability may be the target of a hotkey or other trigger binding, or is
-/// settings-only. A <see cref="CapabilityKind.Reading"/> is never bindable.
+/// settings-only. A <see cref="CapabilityKind.Reading"/> is never bindable, and the constructor
+/// refuses that combination rather than trusting every caller to remember it.
 /// </param>
 public sealed record Capability(
     CapabilityId Id,
     CapabilityKind Kind,
     string Label,
-    bool Bindable = true);
+    bool Bindable = true)
+{
+    /// <summary>
+    /// What kind of value this holds. <b>Get-only on purpose</b> — see <see cref="Bindable"/>.
+    /// </summary>
+    public CapabilityKind Kind { get; } = Kind;
+
+    /// <summary>
+    /// Whether this capability may be a binding target. Validated at construction against
+    /// <see cref="Kind"/>, and <b>get-only on purpose</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <see cref="CapabilityKind.Reading"/> reports a value the module observes; there is nothing
+    /// for a chord to invoke, so binding one is meaningless rather than merely unusual. The rule
+    /// used to live only in this doc-comment while the parameter defaulted to
+    /// <see langword="true"/> — so the shortest possible declaration,
+    /// <c>new Capability(id, CapabilityKind.Reading, "…")</c>, produced exactly the state the
+    /// comment forbade. An invariant stated in prose beside a default that violates it is not an
+    /// invariant.
+    /// </para>
+    /// <para>
+    /// <b>Why <see cref="Kind"/> and this property are get-only rather than <c>init</c>.</b> A
+    /// validating initializer alone would not be enough: a record's <c>with</c> expression runs the
+    /// compiler-generated copy constructor, which assigns fields directly and does <i>not</i> re-run
+    /// property initializers. <c>capability with { Kind = CapabilityKind.Reading }</c> would
+    /// therefore copy <c>Bindable = true</c> straight past the check and reconstruct the illegal
+    /// state the primary constructor just refused. Making both members get-only removes that path at
+    /// compile time — the constructor becomes the only way to choose this pair, and the constructor
+    /// validates. Changing a capability's kind is not an edit anyway; it is a different capability.
+    /// </para>
+    /// <para>
+    /// This throws rather than silently coercing to <see langword="false"/>. A quiet correction
+    /// would hide a real modelling mistake — the author meant a different kind, or a different
+    /// binding — and this project's evidence standard is specifically about not letting a wrong
+    /// belief pass as success.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// The kind is <see cref="CapabilityKind.Reading"/> and the capability was declared bindable.
+    /// </exception>
+    public bool Bindable { get; } = Kind is CapabilityKind.Reading && Bindable
+        ? throw new ArgumentException(
+            $"capability '{Id.Value}' is a {nameof(CapabilityKind.Reading)}, which is never " +
+            "bindable — a reading reports a value, so there is nothing for a binding to invoke. " +
+            $"Pass {nameof(Bindable)}: false, or use a different {nameof(CapabilityKind)}.",
+            nameof(Bindable))
+        : Bindable;
+
+    /// <summary>
+    /// Human-facing text. Never load-bearing; rename at will — but never blank, because the label is
+    /// what a person sees in the settings surface and in a binding-conflict report, and a blank one
+    /// makes the conflict unreadable.
+    /// </summary>
+    /// <exception cref="ArgumentException">The label is null, empty, or whitespace.</exception>
+    public string Label { get; } = string.IsNullOrWhiteSpace(Label)
+        ? throw new ArgumentException(
+            $"capability '{Id.Value}' has a blank label.", nameof(Label))
+        : Label;
+}
