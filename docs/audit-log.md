@@ -72,18 +72,41 @@ knows which.** So the count is now anchored to the **commit that introduced the 
 how many commits share a day, and it answers the question actually being asked — *how much has landed
 since someone last confirmed this doc?*
 
-**A/B on the reviewer's exact scenario** (`tests/README.md`, audited 2026-08-08, untouched, evaluated
-as if it were 2026-08-09):
+**A/B on the reviewer's scenario** (`tests/README.md`, audited 2026-08-08, evaluated as 2026-08-09):
 
 | Basis | Count | Stale? |
 |---|---|---|
-| Old — since date midnight | **18** | **yes** ← false positive, nothing changed since the audit |
+| Old — since date midnight | **18** | **yes** ← false positive |
 | New — since the audit commit | **15** | **no** ✓ |
 
-The 3-commit gap is exactly the commits that preceded the audit that day. And the guard is intact: a
-doc anchored at the root commit sees 17 → **stale**, as it should. An uncommitted or untracked stamp
-returns `None` and the arm is dropped — degrading to "unknown" rather than to a false warning, which
-is the same asymmetry `_repo_commits_since` already documented.
+Guard intact: a doc anchored at the root commit sees 17 → **stale**. An uncommitted or untracked
+stamp returns `None` and the arm is dropped — "unknown" rather than a false warning, the same
+asymmetry `_repo_commits_since` already documented.
+
+> ### ⚠ Correction, same day: that A/B proved the wrong case
+>
+> **CI caught this before merge** — 25 warnings there against 0 locally. The A/B above ran against a
+> `tests/README.md` whose `audited` value had been *changed* (back-dated, then restored). The case
+> that actually applies here is a re-stamp of the **same** value, and `git log -S` detects a change
+> in the *number of occurrences* of a string: rewriting `audited: 2026-08-08` over an identical line
+> produces no diff, so the anchor resolves to the **bootstrap** commit, not to the audit. Every doc
+> re-stamped today still counted 16+ commits.
+>
+> **The information does not exist in git.** A same-day re-audit that changes nothing is
+> unrepresentable, and no query can recover it. So the anchor is right for every audit on a later
+> day and blind to this one, and the same-day skip is restored alongside it — the two together cover
+> day zero and day one, which is as far as a date-valued field can reach. The real fix is to give
+> the stamp a commit; that is a schema change, so it is **TD-15** with a trip-wire, not a smuggled
+> edit.
+>
+> **This is the project's own named failure — "a claim stronger than its evidence" — committed in
+> the act of fixing one.** The A/B was real, ran green, and tested a case the repository was not in.
+> The lesson is narrower than "test more": *when a fix is validated by constructing a scenario,
+> check that the constructed scenario matches the one that motivated the fix.* Back-dating the file
+> to make the test work was precisely the step that made it test something else.
+>
+> Consequence to carry: **the 20 docs stamped in this pass are attested in this log and not in their
+> frontmatter**, because the field cannot hold a same-day re-audit.
 
 ### Backlog
 

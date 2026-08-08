@@ -790,8 +790,16 @@ def _commits_since_audit(path: Path, audited: str) -> int | None:
     day-granular; the audit is an instant, and only git knows which.
 
     So: find the commit that most recently introduced this doc's current `audited:` line, and count
-    from there. That is the real question — *how much has landed since someone last confirmed this
-    doc?* — and it is exact regardless of how many commits share the day.
+    from there. Exact whenever the stamp's VALUE changed, which is every audit on a later day.
+
+    ⚠ **The one case git cannot answer: a re-audit that leaves the value unchanged.** Re-stamping
+    `audited: 2026-08-08` over an identical line produces no diff, so no git query can find it — the
+    information does not exist in the repository. The anchor then resolves to whenever that value
+    was *first* set. That is why the caller ALSO skips this arm while `audited` is today: on a
+    project whose history is one calendar day, a same-day re-audit is exactly this undetectable
+    case, and charging it for the day's earlier commits is the defect this function exists to
+    remove. Recording the audit's commit in frontmatter is the real fix; it is a schema change, so
+    it is proposed in TECH_DEBT (**TD-15**) rather than smuggled in here.
 
     ⚠ This is the ONE place a git failure is deliberately softened, and the asymmetry is the point.
     Staleness is an advisory churn signal that never gates, so an unavailable count degrades to
@@ -861,14 +869,17 @@ def check_accuracy(rep: Report) -> None:
         reasons = []
         if age > STALE_DAYS:
             reasons.append(f"{age}d since the last accuracy pass")
-        # Anchored to the commit that set `audited`, never to the date — see _commits_since_audit.
-        # Counting from midnight on the audited date charges an audit for every commit that
-        # preceded it that day: unclearable on the day itself, and a false stale warning the next
-        # morning with nothing changed since. Both are the same defect at different offsets, and
-        # both are "a check that cannot pass" (OPERATING_MODEL §7's mirror image).
-        commits = _commits_since_audit(p, str(audited))
-        if commits is not None and commits > STALE_COMMITS:
-            reasons.append(f"{commits} commits since")
+        # Two mitigations, because the defect has two offsets and neither alone covers both:
+        #   * the count is anchored to the commit that SET `audited`, not to midnight on its date,
+        #     so an audit is never charged for commits that preceded it (see _commits_since_audit);
+        #   * and the arm is skipped entirely while `audited` is today, because a same-day re-audit
+        #     leaves no diff and is therefore invisible to the anchor lookup above.
+        # Both are "a check that cannot pass" — OPERATING_MODEL §7's mirror image — at day zero and
+        # at day one respectively. The residue is TD-15: a date cannot express an instant.
+        if age > 0:
+            commits = _commits_since_audit(p, str(audited))
+            if commits is not None and commits > STALE_COMMITS:
+                reasons.append(f"{commits} commits since")
         if reasons:
             rep.add("warn", "accuracy", rel, None,
                     f"accuracy stale ({'; '.join(reasons)}; audited {audited})",
