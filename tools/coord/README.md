@@ -82,7 +82,7 @@ what each path can and cannot do is in [dev-setup.md](../../docs/runbooks/dev-se
 | `coord doctor` | Reports the toolchain honestly and says what this machine can do. | no |
 | `coord audit` | Documentation + modularity drift check. `--quiet`, `--format json`, `--no-fail`, `--accuracy`, `--since REF`. | no |
 | `coord map` | Regenerates the documentation index. `--check` verifies it is current. | no |
-| `coord new-module <name>` | Scaffolds a module: README, docs, Core and Shell projects, tests project. | no |
+| `coord new-module <name>` | Scaffolds a module: README, docs, Core and Shell projects, tests project. Fills in around a docs-only module; never overwrites an existing file. | no |
 | `coord test [NAME…]` | Runs the Core test suites over any discovered test project. `--filter`, `-c`. | **yes** |
 | `coord build` | Compiles the C#. `--project`, `--core-only`, `-c`. | **yes** |
 | `coord run` | Launches the Shell host. **Windows only.** | **yes** |
@@ -172,6 +172,24 @@ anything else.
 ./coord new-module zones
 ./coord --dry-run new-module zones   # see exactly what would be created
 ```
+
+**A module may already exist as documentation, and that is normal here.**
+[MODULE_SPEC](../../docs/MODULE_SPEC.md) says to write the spec before the code, and Zones was
+designed in full while the module host that would load it did not exist. So when
+`src/modules/<name>/` is already there but holds **no project file**, the scaffolder fills the code
+in around it and reports which files it kept:
+
+```text
+> src/modules/zones exists and holds documentation only — adding the code projects around it,
+  leaving every existing file untouched.
+> kept existing src/modules/zones/README.md
+> kept existing src/modules/zones/docs/ARCHITECTURE.md
+```
+
+It **never overwrites a file that already exists**, and it still refuses outright when a `.csproj`
+is present — clobbering real code is the thing worth refusing, not clobbering an empty directory.
+Both behaviours are covered by `tools/coord/tests/test_scaffold.py`, including a test that the
+refusal still fires.
 
 What it lays down:
 
