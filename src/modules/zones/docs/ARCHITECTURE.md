@@ -20,6 +20,7 @@ related:
   - docs/decisions/0019-layout-edits-are-a-transaction.md
   - docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md
   - docs/decisions/0021-requested-versus-granted-regions.md
+  - docs/decisions/0023-the-control-plane-carries-state-not-deltas.md
   - docs/runbooks/manual-validation.md
 ---
 
@@ -492,28 +493,42 @@ contention used to be a refusal, and it is gone.*
 ### 7.4 Losing and regaining a region
 
 A grant is a **revocable lease**, so a higher-priority module requesting a rectangle Zones holds
-**takes it**, and Zones is told: a `RegionsRevoked` dispatch naming the rectangles, delivered on a
-worker ([CONDUIT §3.6.1](../../../../docs/CONDUIT.md#361-requested-and-granted-are-two-different-values)).
-Conduit has already updated the armed set — Zones does not republish to comply, and must not try.
+**takes it** — and when that module withdraws, unregisters or loses priority, Conduit recomputes
+grants from every module's standing request and Zones gets it back. Zones' *request* never changes
+through any of this; only the grant does, so there is nothing to re-publish and nothing to remember
+([ADR 0021](../../../../docs/decisions/0021-requested-versus-granted-regions.md)).
 
-**And the region comes back on its own.** When the other module withdraws, unregisters, or loses
-priority, Conduit recomputes grants from every module's standing request and Zones receives
-`RegionsRestored` for the rectangles it regains
-([ADR 0021](../../../../docs/decisions/0021-requested-versus-granted-regions.md)). Zones' *request*
-never changed — only the grant did — so there is nothing to re-publish and nothing to remember.
+**Zones is told by one message carrying the whole current grant**, on Conduit's control plane
+([CONDUIT §3.6.1](../../../../docs/CONDUIT.md#361-requested-and-granted-are-two-different-values)):
 
-Both handlers are small and symmetric:
+```csharp
+// SKETCH — illustrative, not compiled.
+void OnGrantChanged(ArmedRegionSet granted, int grantVersion)
+{
+    if (grantVersion <= _appliedGrantVersion) return;   // already past this
+    _appliedGrantVersion = grantVersion;
+    _cyclableZones = ZonesCoveredBy(granted);           // adopt, do not diff
+}
+```
 
-| On `RegionsRevoked` | On `RegionsRestored` |
-|---|---|
-| Mark the named zones **un-cyclable** | Mark them **cyclable** again |
-| Leave occupancy untouched — losing the wheel gesture over a zone changes nothing about which windows belong in it | Same: occupancy was never involved |
-| **Say so** in the designer, for the same reason a refused activation is surfaced rather than swallowed | **Stop saying so.** A zone still shown as unavailable an hour after it came back is the failure mode of handling only one direction |
-| **Do not retry.** Re-requesting is fighting the user's own priority setting, and it cannot win | Nothing to do — no publication, no acknowledgement |
+**The handler adopts the set; it never diffs.** That is what makes it correct regardless of what was
+delivered before it — a message coalesced away, or one arriving late, cannot leave Zones out of step,
+because every message states the whole truth. The version guard makes it independent of a delivery
+guarantee Zones cannot verify.
 
-**Handling only revocation is the tempting half-implementation**, and it fails silently in the
-direction nobody tests: the feature works, then stops, then never starts again even though it could.
-That is why the restore path gets its own test rather than being assumed to follow.
+Everything else follows from `_cyclableZones`:
+
+- **Occupancy is untouched.** Losing the wheel gesture over a zone changes nothing about which windows
+  belong in it. The grant governs the gesture, not the model.
+- **The designer marks zones that are not cyclable**, and un-marks them when they come back — for the
+  same reason a refused activation is surfaced rather than swallowed. A zone still shown as
+  unavailable an hour after it was restored is exactly as wrong as one silently ignoring the wheel.
+- **Zones never re-requests.** Re-publishing a rectangle the user's own priority setting gave to
+  someone else is a module fighting its user, and it cannot win.
+
+*An earlier draft handled two delta events, `RegionsRevoked` and `RegionsRestored`. Adopting a state
+is strictly less work than reconciling two deltas, and it is the only version that survives a
+notification being coalesced away under load.*
 
 **The chord bindings are unaffected throughout**, which is the second time §8.1's decision to make
 `cycle-forward` / `cycle-back` Actions pays for itself: the feature loses its pointer affordance and
@@ -660,12 +675,15 @@ Core tests, all runnable on any OS with no desktop:
   stops `Win`+wheel swallowing scroll events over an ordinary window. Plus the partial-grant path: a
   publication whose rectangles are contested is **accepted**, and the result names what was granted so
   the withheld zones can be marked.
-- **Revocation and restoration, both directions.** `RegionsRevoked` marks exactly the named zones
-  un-cyclable, leaves occupancy untouched, and triggers **no republication** — write that last
-  assertion first, because a handler that "helpfully" re-publishes turns one revocation into a loop
-  against the user's own priority setting. Then `RegionsRestored` marks them cyclable again and clears
-  the designer's marker. **A suite that tests only revocation passes on the half-implementation whose
-  failure is a feature that never comes back**, so the restore case is not optional coverage.
+- **Grant adoption, in both directions and out of order.** A `GrantChanged` carrying a reduced set
+  marks exactly those zones un-cyclable, leaves occupancy untouched, and triggers **no republication**
+  — write that last assertion first, because a handler that "helpfully" re-publishes turns one
+  revocation into a loop against the user's own priority setting. A later `GrantChanged` restoring
+  them marks them cyclable again and clears the designer's marker. Then the two that matter under
+  load: **applying only the newest message must reach the same state as applying every message**
+  (which is what lets Conduit coalesce), and a message whose `GrantVersion` is **not newer** must be
+  ignored. A suite testing only the revoke direction passes on the half-implementation whose failure
+  is a feature that never comes back.
 - **Dispatch by token** — a cycle dispatch carrying a stale region-set version is dropped, and cycling
   never hit-tests the context cursor to find its zone. Written as a test because the tempting
   implementation is the wrong one.
@@ -709,7 +727,7 @@ that ends outside any zone.
 | 7 | **Stack membership does not survive a restart** | Accepted for M1 — window handles do not survive either. Re-associating by process and title is a heuristic that will be wrong silently, which is worse than starting empty |
 | 8 | **An edit that half-applies** — new template, old occupancy, stale armed regions | One `LayoutEdit` transaction applied in one step (§7.3); the `GeometryStamp` catches anything that escapes it ([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)) |
 | 9 | **Another module requests a region Zones needs** | Contention is arbitrated, not refused: the publication is accepted and the result names what was granted — never a rollback of the user's layout (§7.3). Cycling degrades on the withheld zones; the chord bindings are unaffected |
-| 10 | **A region Zones holds is revoked** mid-session, **and later comes back** | Mark un-cyclable, say so, **do not retry**; then handle `RegionsRestored` and mark it cyclable again (§7.4). Handling only the first half leaves a permanently dead affordance |
+| 10 | **A region Zones holds is revoked** mid-session, **and later comes back** | One `GrantChanged` carries the whole current grant; Zones **adopts the set** rather than diffing, guarded by `GrantVersion` (§7.4). Adoption is idempotent and order-insensitive, so a coalesced or late message cannot desynchronize it |
 
 ---
 

@@ -1,7 +1,10 @@
 # ADR 0021 — A module states a standing request; Conduit computes the grants and keeps recomputing them
 
 Date: 2026-08-08
-Status: Accepted · Corrects [ADR 0013](0013-the-pointer-gesture-trigger-kind.md)
+Status: Accepted · Corrects [ADR 0013](0013-the-pointer-gesture-trigger-kind.md) · **Delivery corrected
+by [ADR 0023](0023-the-control-plane-carries-state-not-deltas.md)** — the two delta notifications below
+are replaced by one absolute `GrantChanged(Granted, GrantVersion)` on a control plane that may not drop
+the final state
 
 ## Context
 
@@ -67,17 +70,24 @@ protocol that rule forced. Genuine errors still refuse the whole publication —
 module believing it armed regions it does not own. Reporting the grant on every publication *and* on
 every later change answers that directly, where a refusal answered it only by refusing to proceed.
 
-### 4. Both transitions are notified, and both bump the version
+### 4. Every change to `Granted` is notified, and bumps the version
 
-- **`RegionsRevoked`** — rectangles this owner has lost, because someone with higher priority now
-  requests them.
-- **`RegionsRestored`** — rectangles this owner has regained, because the higher-priority requester
-  withdrew, unregistered, or lost priority.
+> **This section only — corrected by [ADR 0023](0023-the-control-plane-carries-state-not-deltas.md).**
+> The request/grant model above stands; only the delivery mechanism changes. This originally
+> specified two **delta** notifications — `RegionsRevoked` and `RegionsRestored` — delivered as
+> *"ordinary dispatches on a worker"*. That is a bounded queue which drops the oldest coalescible item
+> under overload, so a dropped restore would leave a module showing a zone as unavailable **forever**
+> (nothing retries, by §4's own rule), and a revoke arriving after a restore produces the same wrong
+> end state. Deltas need every message, in order; that queue promises neither.
+>
+> Both are replaced by one **absolute** message, `GrantChanged(Granted, GrantVersion)`, delivered on a
+> **control plane**: serial per owner, latest-state coalescing, the final state never dropped. A
+> consumer adopts the set instead of diffing, which is idempotent and order-insensitive.
 
-Both are ordinary dispatches on a worker, never on the hook thread. **Both bump `GrantVersion`**, and
-a queued gesture carries the version it was recognized under, so an event recognized under a lease
-that has since changed is dropped rather than executed. Without the bump on *restoration*, an event
-recognized before a revocation could execute after the region came back — acting on an arbitration
+**`GrantVersion` bumps on every change to `Granted`**, and a queued gesture carries the version it was
+recognized under, so an event recognized under a lease that has since changed is dropped rather than
+executed. The bump on *restoration* is as load-bearing as the one on revocation: without it, an event
+recognized before a revocation could execute after the region came back, acting on an arbitration
 state that no longer exists.
 
 **A module never re-publishes to regain a region.** Restoration is Conduit's job precisely because the

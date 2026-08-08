@@ -364,16 +364,44 @@ grants = arbitrate(every owner's Requested, priority order)
 — re-run whenever a module publishes, a module registers or unregisters, or **a priority setting
 changes**. No previous grant map is an input, and arrival order appears nowhere in the computation.
 
-**Both transitions are notified, and both bump `GrantVersion`:**
+**Recomputation is serialized**, for the same reason publication is
+([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)): two overlapping
+recomputations could each read the request set, arbitrate, and swap, with the loser's older result
+landing last. Since a recomputation reads all requests at execution time, concurrent triggers coalesce
+into one run — the same property, for the same reason. It happens on registration, settings-save and
+unregistration, never on the input path.
 
-| Notification | When |
-|---|---|
-| **`RegionsRevoked`** | a higher-priority requester now wants rectangles this owner held |
-| **`RegionsRestored`** | the higher-priority requester withdrew, unregistered, or lost priority, and these rectangles come back |
+**Every change to `Granted` bumps `GrantVersion` and emits one control-plane message:**
 
-Both are ordinary worker dispatches, never hook-thread work. **The version bump on *restoration* is as
-load-bearing as the one on revocation:** a gesture recognized under the old lease and still queued must
-not execute against an arbitration state that has since changed, and "changed back" is still changed.
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record GrantChanged(ArmedRegionSet Granted, int GrantVersion);
+```
+
+**Absolute state, not a delta** ([ADR 0023](decisions/0023-the-control-plane-carries-state-not-deltas.md)).
+The obvious design is a `RegionsRevoked` / `RegionsRestored` pair, and it is wrong here: deltas are
+correct only if *every* message is delivered in order, and §5.3's event-plane queue promises neither.
+A dropped restore leaves a module showing a zone as unavailable **forever** — nothing retries, because
+a module must not re-request — and a revoke arriving after a restore produces the same wrong end state.
+One absolute message removes both failures: the consumer **adopts the set**, which is idempotent and
+order-insensitive.
+
+Delivery is the **control plane**: serial per owner, latest-state coalescing, **the final state is
+never dropped**. Under pressure a pending update is *replaced* by the newer one, so the per-owner
+depth is effectively one and the survivor is always the most complete.
+
+- **A version gap is normal, not an error.** A module may see `GrantVersion` go 5 → 9 because 6–8 were
+  superseded. Stated plainly because the alternative is an implementer writing a gap-detected-resync
+  loop that fires hardest under exactly the load it was meant to help.
+- **A module ignores a version it has already passed** (`≤` the last applied). Cheap, local, and it
+  makes the module correct independently of a delivery guarantee it cannot verify.
+- **There is a current-grant read** — `QueryGrant(module) -> (Granted, GrantVersion)` — for
+  **recovery**: a handler that faulted, or a module re-initialising, resynchronizes in one call rather
+  than waiting for an arbitration change that may never come. Not for routine gap-filling.
+
+**The version bump on *restoration* is as load-bearing as the one on revocation:** a gesture recognized
+under the old lease and still queued must not execute against an arbitration state that has since
+changed, and "changed back" is still changed.
 
 **A module never re-publishes to regain a region**, and must not try. Its request never went away;
 restoration is Conduit's job. A module that re-requests on revocation is fighting the user's own
@@ -386,9 +414,9 @@ across a full preempt-then-withdraw cycle, which is the case the previous design
 cycle.
 
 The cost is honest, and it is two things. Conduit now stores rectangles a module is **not** currently
-granted, bounded by the same per-module cap that bounds the hook test. And a module must handle
-regions **arriving** as well as leaving — slightly more surface, and the alternative is a permanently
-greyed-out affordance that has actually been available for an hour. Zones' side is
+granted, bounded by the same per-module cap that bounds the hook test. And a module must **adopt a
+grant set** rather than react to a change — which is less work than handling two delta events, and is
+the shape that survives a message being coalesced away. Zones' side is
 [ARCHITECTURE §7.4](../src/modules/zones/docs/ARCHITECTURE.md#74-losing-and-regaining-a-region).
 
 #### Withdrawal always succeeds
@@ -550,6 +578,31 @@ forbid it in the fabric than to document it in every module.
 module; sustained overruns disable the module rather than let it degrade the input path, which is
 the "Dispatch" row of [COORDINATOR.md §6](COORDINATOR.md).
 
+#### Two dispatch classes, with opposite guarantees
+
+Everything above describes the **event plane**, and its drop policy is right for it: a wheel tick
+that never arrives is a cosmetic loss, and buffering on the hook path would be worse than the loss.
+
+That reasoning does **not** transfer to a message that says *what the world currently is*. Conduit
+carries those too — the grant updates in §3.6.1 — and a dropped one desynchronizes a module
+permanently, because there is nothing to retry and no later event that repairs it
+([ADR 0023](decisions/0023-the-control-plane-carries-state-not-deltas.md)):
+
+| | **Event plane** | **Control plane** |
+|---|---|---|
+| Carries | something happened — a tick, a chord, a gesture | what the world **is** — the current grant |
+| Under overload | **drop the oldest coalescible**, and count the drop | **never drop the final state**; replace pending with the newer |
+| Ordering | none across kinds | **serial per owner** |
+| Payload | a delta — this happened | **absolute state** — this is how things are |
+| A lost message costs | a cosmetic miss | **permanent desynchronization** |
+
+**The payload row is what makes the guarantee affordable.** A delta is correct only if every message
+arrives in order; an absolute snapshot is correct if **the last one** arrives — which is a promise a
+bounded queue can keep, and it makes a coalesced-away intermediate harmless instead of corrupting.
+
+*This distinction was implicit and wrong: these messages were specified as "ordinary dispatches" and
+were therefore droppable by a policy whose correctness argument never covered them.*
+
 ### 5.4 Proving the guard, not asserting it
 
 [OPERATING_MODEL §7](OPERATING_MODEL.md)'s operational rule — *when you add a guard, prove it fails
@@ -581,6 +634,20 @@ advance so it does not get negotiated later:
   every other order, all ending in the identical armed map. A permutation test without the withdraw
   step passes under the design [ADR 0021](decisions/0021-requested-versus-granted-regions.md)
   replaced, because that design's defect only appears once a winner leaves.
+- **Publication ordering (§5.5) gets a deterministic race, driven by an injected schedule rather than
+  by timing.** Hold the sequencer after a heartbeat request is enqueued, deliver a foreground change
+  that publishes at sequence *n*, release the sequencer, and assert three things: the final record is
+  the **new** foreground, `Sequence` never carries an older observation than a lower one, and the
+  repair counter **did not** increment — the event reported the change, so nothing was repaired. Run
+  it against a build where each path samples then swaps independently and it must go red on the first
+  assertion. Racing by real threads and hoping is not a test; the schedule is what makes the failure
+  reproducible.
+- **Control-plane delivery (§3.6.1) gets a saturation test**, because the guarantee is specifically
+  about behaviour *under overload* and is vacuous when nothing is under pressure. Fill the event queue
+  so it is dropping, then drive **revoke → restore**, and assert the module eventually observes the
+  **restored** grant and never afterwards applies the revoked one. Then assert the same holds when the
+  two updates coalesce — the survivor must be the newer, complete state. A version-ignoring consumer
+  must fail this test.
 - **Latency itself cannot be tested this way**, and pretending otherwise would be the exact failure
   §7 names. Actual hook latency is a [manual-validation](runbooks/manual-validation.md) row, measured
   on a real desktop, recorded with a date and a machine. No Core test result may ever be described as evidence about it.
@@ -688,12 +755,56 @@ So the staleness test is a **liveness check on the publisher, not an age check o
 
 | Mechanism | What it establishes |
 |---|---|
-| **Heartbeat.** Atlas **re-samples the foreground window and republishes** on a fixed interval, even when no change notification arrived, bumping `Sequence` and `HeartbeatAtTicks` | Separates *"nothing has changed"* from *"the publisher has died"* — and **repairs** a missed foreground update rather than certifying it |
+| **Heartbeat.** On a fixed interval Atlas **requests a publication**, and the sequencer re-samples the foreground, bumping `Sequence` and `HeartbeatAtTicks` | Separates *"nothing has changed"* from *"the publisher has died"* — and **repairs** a missed foreground update rather than certifying it |
 | **`Sequence` is monotonic and gap-free** | A reader that sees it stop advancing across heartbeat intervals knows publication has stopped, whatever the content says |
 | **`ContextStale` fires on missed heartbeats only** — `now - HeartbeatAtTicks` beyond a small multiple of the interval | The refusal now means *"Atlas stopped publishing"*, which is a genuine fault, rather than *"the desktop has been quiet"*, which is not |
 
 > **Content age is never, on its own, a refusal reason.** An unchanged event-driven fact does not
 > decay.
+
+#### One sequencer: sampling, sequencing and swapping are one operation
+
+**An atomic swap orders the write; it does not order the writers.** Two paths publish `DesktopFacts`
+— the event path and the heartbeat — and if each samples independently and then swaps, this
+interleaving is available:
+
+| Step | Thread | Effect |
+|---|---|---|
+| 1 | heartbeat | samples the foreground: **A** |
+| 2 | — | the user switches windows; the foreground becomes **B** |
+| 3 | event path | samples **B**, takes sequence **41**, swaps |
+| 4 | heartbeat | takes sequence **42**, swaps its step-1 sample — **A** |
+
+The record now reads **A at sequence 42**: the content has gone *backwards* while carrying the
+*higher* sequence, so every consumer rule of the form "a higher sequence is a later observation" now
+points at the older one. The repair mechanism has become the corruption mechanism.
+
+So **neither path publishes. Both request publication**, and one Atlas-owned sequencer does the whole
+thing as one ordered operation ([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)):
+
+```
+request(reason) ──▶ ┌─────────── the sequencer ───────────┐
+                    │  1. sample the live facts           │
+                    │  2. allocate the next Sequence      │
+                    │  3. swap the immutable record       │
+                    └─────────────────────────────────────┘
+```
+
+> **Invariant.** A record with a higher `Sequence` was **sampled** later. Sequence order is
+> observation order — which is what the previous design claimed and did not have.
+
+**It is a serial agent, not a lock callers hold.** Requests enqueue; nobody blocks. A topology
+publication samples monitor geometry, and a lock held across an enumeration by whichever thread
+noticed the change is the shape that eventually stalls something that matters.
+
+**The hook thread is untouched.** It only ever *reads* the published reference — one atomic load, no
+coordination. Publication ordering is a producer-side concern and stays there.
+
+**Pending requests coalesce for free**, because the sequencer samples at execution time: N pending
+requests collapse to one sample of the same world. **A coalesced publication is attributed
+event-driven if any of its requests was**, so a heartbeat that coalesces with a real event does not
+record a repair that never happened — a false alarm in a counter whose whole purpose is making a
+broken event path visible.
 
 #### The heartbeat re-samples; it does not rubber-stamp
 

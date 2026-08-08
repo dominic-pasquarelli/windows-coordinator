@@ -26,6 +26,77 @@ related:
 
 ---
 
+## 2026-08-08 — PR #2 round 7: two concurrency contracts that atomicity did not provide
+
+**Scope:** the `DesktopFacts` publication path and the grant-notification delivery path, re-read
+against a review that accepted round 6's two fixes and found each had specified a *primitive* where a
+*protocol* was needed.
+
+**Mechanical result:** `coord audit` 0/0/0 · `coord audit --since origin/main` 0/0/0 ·
+`coord map --check` clean · 11 scaffold tests green. **No C# changed.** Nothing has run on Windows.
+
+### The two
+
+| # | Gap | Landed as |
+|---|---|---|
+| 1 | Publication was an **atomic reference swap** — which orders the *write* but not the *writers*. A heartbeat could sample foreground A, lose the CPU while the event path published B at seq 41, then swap A at seq 42: content backwards, sequence forwards, inverting the one rule consumers are given | [ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md) — one Atlas-owned sequencer does sample → allocate → swap as one ordered operation. Invariant: **a higher `Sequence` was sampled later** |
+| 2 | Grant changes were **delta events on the ordinary dispatch queue** — which §5.3 explicitly allows to drop the oldest coalescible item. A dropped `RegionsRestored` leaves a module showing a zone unavailable forever, and a revoke arriving after a restore inverts the end state | [ADR 0023](decisions/0023-the-control-plane-carries-state-not-deltas.md) — a second dispatch class carrying **absolute state**: `GrantChanged(Granted, GrantVersion)`, serial per owner, latest-state coalescing, final state never dropped, plus a `QueryGrant` read for recovery |
+
+### The pattern — a correct primitive assumed to be a correct protocol
+
+Both defects have the same shape, and it is a new one for this project's ledger. In each case the
+mechanism named was **genuinely correct at what it does**, and was doing a *different job* than the
+one the design needed:
+
+- an atomic swap **is** the right way to hand an immutable record to a concurrent reader. It says
+  nothing about which of two writers samples first, and the design needed an ordering between *writes*
+  that no property of the *write* provides;
+- the bounded drop-oldest queue **is** the right policy for input, and its correctness argument is
+  explicitly *"a dropped wheel tick is cosmetic"*. That argument was never checked against the second
+  kind of message the queue had started carrying.
+
+**The generalisable question: for each mechanism, what exactly does it guarantee, and is that the
+property being relied on?** "Atomic" and "queued on a worker" both read as sufficient at a glance;
+neither was, and neither was wrong — they were answering a question nobody had asked.
+
+Round 2's finding sits in the same family in hindsight: content age was a *correct measure of
+elapsed time* being used as a proxy for correctness.
+
+### The architectural residue, which is the useful part
+
+Blocker 2 forced a distinction Conduit had been eliding: it has an **event plane** (something
+happened; droppable; a loss is cosmetic) and a **control plane** (what the world is; the final state
+may not be dropped; a loss desynchronizes permanently). That is now a table in
+[CONDUIT §5.3](CONDUIT.md#53-the-hand-off), and it has forward value — any future *"here is the current
+state of X"* message has a place to go, and the question "is this an event or a state?" now has an
+answer with consequences attached.
+
+The delta-vs-absolute choice is what makes the guarantee affordable, and it is worth remembering
+independently: **a delta is correct only if every message arrives in order; an absolute snapshot is
+correct if the last one arrives.** The second is a promise a bounded queue can actually keep.
+
+### Guards, with their proofs
+
+Both are guards that can be implemented as decoration, so §5.4 specifies how each must be seen
+failing:
+
+- **Publication ordering by injected schedule, not by racing threads.** Hold the sequencer after a
+  heartbeat request is enqueued, deliver a foreground event, release, then assert: final record is the
+  new foreground · sequence never carries an older observation · **the repair counter did not
+  increment** (an event reported the change, so nothing was repaired). Red against independent
+  sample-then-swap. Racing real threads and hoping is not a test.
+- **Control-plane delivery under saturation**, because the guarantee is *specifically* about overload
+  and is vacuous when nothing is under pressure. Fill the event queue until it drops, drive revoke →
+  restore, assert the module observes the restored grant and never afterwards applies the revoked one
+  — then assert the same when the two coalesce. A version-ignoring consumer must fail.
+
+### Still owed
+
+- P1 and P2 before any Zones code. `Z-1`…`Z-6` remain written and never executed.
+- Seven review rounds: the specification is materially better and the implementation has not started.
+
+---
+
 ## 2026-08-08 — PR #2 round 6: two lifecycle gaps, both "what happens afterwards?"
 
 **Scope:** the `DesktopFacts` publication contract and the pointer-gesture arbitration lifecycle,

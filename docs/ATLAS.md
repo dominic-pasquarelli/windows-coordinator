@@ -166,13 +166,27 @@ a microsecond budget where calling Atlas is forbidden outright
 ([CONDUIT §5.2](CONDUIT.md#52-what-may-happen-inside-a-hook-callback)). So Atlas additionally
 **publishes an immutable `DesktopFacts` record** — foreground window, monitor geometry, topology
 generation, a monotonic sequence number — and republishes it whenever the foreground window or the
-topology changes. Publication is an atomic reference swap under
-[CONDUIT §3.6](CONDUIT.md#36-pointer-gesture)'s contract, so the hook thread's read is a reference
-load with a known worst case.
+topology changes. The record itself follows
+[CONDUIT §3.6](CONDUIT.md#36-pointer-gesture)'s publication contract — immutable value, atomic
+reference swap, lifetime owned by the reader's side — so the hook thread's read is a reference load
+with a known worst case.
 
-**Atlas also heartbeats it**, on a fixed interval, and the heartbeat **re-samples the foreground
-window** rather than republishing the previous record. Both halves of that matter, for different
-reasons:
+**Every publication goes through one Atlas-owned sequencer**, which **samples the live facts,
+allocates the sequence, and swaps the record as one ordered operation**
+([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)). Neither the event path
+nor the heartbeat publishes on its own — both *request* publication and carry no sample.
+
+That is not ceremony. With two independent writers, a heartbeat that sampled the foreground, lost the
+CPU while an event published a newer one, and then swapped its own stale sample under a **higher**
+sequence would leave the record reading older content with a newer number — inverting the one rule
+consumers are given. Sampling inside the sequenced region makes it unrepresentable: **a higher
+`Sequence` was sampled later, always.** The sequencer is a serial agent rather than a lock callers
+hold, so nobody blocks on it and no enumeration is performed under a caller's lock; the hook thread
+still only ever does a single atomic load.
+
+**Atlas also heartbeats it**, on a fixed interval, and the heartbeat's publication **re-samples the
+foreground window** rather than reissuing the previous record. Both halves of that matter, for
+different reasons:
 
 - **Publishing on an interval at all** exists because `DesktopFacts` is event-driven: on a desktop
   nobody is touching, a record can be an hour old and completely correct, so *age cannot be the
@@ -180,10 +194,12 @@ reasons:
   same observation, and any age threshold would eventually reject every hook gesture on a stable
   desktop — the feature failing *because* things were calm.
 - **Re-sampling** exists because a liveness-only heartbeat would keep certifying a **wrong** record as
-  live. If a foreground-change notification is ever missed, a heartbeat that republishes the previous
+  live. If a foreground-change notification is ever missed, a heartbeat that reissues the previous
   value advances the sequence forever over stale content. Re-reading the foreground bounds that: a
   missed publication is repaired within one interval, and Atlas **counts** each repair, because
-  self-healing with no trace hides a broken event path.
+  self-healing with no trace hides a broken event path. A publication is only counted as a repair when
+  **no event reported the change** — coalesced requests are attributed event-driven if any of them
+  was, so a heartbeat overlapping a real event does not log a repair that never happened.
 
 **Only the foreground is re-sampled, and the asymmetry is the argument.** Reading it is one call;
 enumerating monitors is what a snapshot is for. More importantly, a consumer *can* detect a missed

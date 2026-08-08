@@ -10,6 +10,7 @@ related:
   - docs/decisions/0019-layout-edits-are-a-transaction.md
   - docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md
   - docs/decisions/0021-requested-versus-granted-regions.md
+  - docs/decisions/0023-the-control-plane-carries-state-not-deltas.md
   - docs/MODULE_SPEC.md
   - docs/ATLAS.md
   - docs/CONDUIT.md
@@ -33,7 +34,7 @@ Nothing in this directory is implemented. What exists is the design —
 | | State |
 |---|---|
 | Internal design ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | **done** — addressing, occupancy and member states, dormancy, stacking, cycling, reconciliation, the layout designer, dragons |
-| Decisions (ADR 0012 – 0021) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing, edits as a transaction, dormancy and displacement, region request-vs-grant |
+| Decisions (ADR 0012 – 0023) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing, edits as a transaction, dormancy and displacement, region request-vs-grant, publication ordering, control-plane delivery |
 | `Coordinator.Zones.Core` | **TODO** — not created. `coord new-module zones` adds it around these docs |
 | `Coordinator.Zones.Shell` (the drag overlay) | **TODO** — not created |
 | Core tests | **TODO** — not created |
@@ -88,11 +89,11 @@ forces, is [ARCHITECTURE §3](docs/ARCHITECTURE.md#3-cycling-and-the-gesture-pro
 3. [docs/ATLAS.md](../../../docs/ATLAS.md) and [docs/CONDUIT.md](../../../docs/CONDUIT.md) — the two
    pillars Zones is built on. Zones needs several extensions from each — zone addressing and
    durable monitor keys, z-order, `Show`, the pointer-gesture kind, the invocation context, and
-   region arbitration — specified in ADRs 0013–0017 and 0021.
+   region arbitration — specified in ADRs 0013–0017 and 0021–0023.
 
 ## Decisions that shaped this module
 
-The unified log is [`docs/decisions/`](../../../docs/decisions/). The ten that govern Zones:
+The unified log is [`docs/decisions/`](../../../docs/decisions/). The eleven that govern Zones:
 
 - **[ADR 0012](../../../docs/decisions/0012-zones-stacking-model.md)** — a zone holds an ordered
   stack; stacking is z-order; membership is intent reconciled against the desktop; stacks are
@@ -121,6 +122,9 @@ The unified log is [`docs/decisions/`](../../../docs/decisions/). The ten that g
 - **[ADR 0021](../../../docs/decisions/0021-requested-versus-granted-regions.md)** — Conduit keeps a
   module's *requested* regions separate from its *granted* ones, so contention is arbitrated rather
   than refused and a preempted region returns automatically when the winner withdraws.
+- **[ADR 0023](../../../docs/decisions/0023-the-control-plane-carries-state-not-deltas.md)** — grant
+  changes travel as **absolute state** on a control plane that never drops the final state, so a
+  coalesced or reordered notification cannot leave a module out of step.
 
 ## Where to resume
 

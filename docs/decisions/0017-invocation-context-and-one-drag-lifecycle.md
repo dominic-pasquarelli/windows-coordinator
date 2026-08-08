@@ -1,10 +1,12 @@
 # ADR 0017 — Every dispatch carries an invocation context, and a drag has exactly one lifecycle
 
 Date: 2026-08-08
-Status: Accepted · **Corrected twice after review of PR #2** — (1) the context is captured at
+Status: Accepted · **Corrected three times after review of PR #2** — (1) the context is captured at
 **recognition**, not sampled at dispatch, and what is capturable differs by source; (2) a hotkey chord
 is an **`OsCallback`** origin, not a hook, and cached-fact staleness is a **publisher-liveness** check
-rather than an age threshold. See §1 below and
+rather than an age threshold, with the heartbeat re-sampling the foreground; (3) publication is
+serialized through one sequencer — [ADR 0022](0022-one-publication-sequencer-for-desktop-facts.md).
+See §1 below and
 [CONDUIT §5.5](../CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context).
 
 ## Context
@@ -94,6 +96,13 @@ staleness mechanism attesting to staleness. Re-reading the foreground each inter
 
 > **A missed foreground-change publication is repaired within one heartbeat interval**, and each
 > repair is counted, because silent self-healing hides a broken event path.
+
+**And both publication paths go through one sequencer**
+([ADR 0022](0022-one-publication-sequencer-for-desktop-facts.md)), which samples, allocates the
+sequence, and swaps as one ordered operation. *An atomic swap orders the write and not the writers:*
+with each path sampling independently, a heartbeat could sample the old foreground, lose the CPU while
+an event published the new one, and then swap its stale sample under a **higher** sequence — content
+going backwards while the number went forwards, inverting the only rule consumers are given.
 
 **Only the foreground, and the asymmetry is the reason.** Correctness for *topology* is checkable
 downstream — `TopologyGeneration` travels on the context, and a module reading a full snapshot

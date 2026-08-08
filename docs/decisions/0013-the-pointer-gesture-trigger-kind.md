@@ -1,7 +1,7 @@
 # ADR 0013 — A sixth Conduit trigger kind: the pointer gesture, decided from pre-resolved regions
 
 Date: 2026-08-08
-Status: Accepted · Extended after review of PR #2 — the update, revocation, queue and token contract is in [CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture) · **Arbitration corrected by [ADR 0021](0021-requested-versus-granted-regions.md)**: contention is arbitrated rather than refused, Conduit keeps *requested* separate from *granted*, and a revoked region is restored automatically
+Status: Accepted · Extended after review of PR #2 — the update, revocation, queue and token contract is in [CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture) · **Arbitration corrected by [ADR 0021](0021-requested-versus-granted-regions.md)**: contention is arbitrated rather than refused, Conduit keeps *requested* separate from *granted*, and a revoked region is restored automatically · **Delivery corrected by [ADR 0023](0023-the-control-plane-carries-state-not-deltas.md)**: grant changes travel as absolute state on a control plane that may not drop the final state
 
 ## Context
 
@@ -56,7 +56,7 @@ they change. Conduit stores them. The hook does a rectangle test and nothing els
 | Required | This kind |
 |---|---|
 | **Refusal reasons** | `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded). **Contention is not among them** — an overlapping request is accepted and arbitrated, and the result reports which rectangles were granted ([ADR 0021](0021-requested-versus-granted-regions.md)) |
-| **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide. **Who wins is explicit user priority, then stable module id** — never registration order. A grant is a **revocable lease**: a higher-priority claim preempts and the incumbent is told (`RegionsRevoked`); a lower-priority claim is refused ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)) |
+| **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide. **Who wins is explicit user priority, then stable module id** — never registration order. A grant is a **revocable lease**: a higher-priority claim preempts, and every owner is told its whole current grant by one `GrantChanged` on the control plane ([ADR 0021](0021-requested-versus-granted-regions.md), [ADR 0023](0023-the-control-plane-carries-state-not-deltas.md)) |
 | **Dispatch class** | Hook for the *decision*; the **dispatch runs on a worker**. The hook's entire job is: test, swallow-or-pass, queue |
 | **Guarantee statement** | Delivered as a discrete event carrying the capability id, the **matched zone token**, the **region-set version** it matched under, and a tick delta. **Coalesced** under load, keyed on `(intent, zone token)`. **Not** guaranteed: one dispatch per physical detent, ordering against other input kinds, or delivery at all when the queue is saturated — a dropped cycle tick is a cosmetic loss, and pretending otherwise would mean buffering on the hook path |
 | **Core model with a fake source** | The recognizer is a pure function `(cursor, modifiers, armed regions) -> Swallow \| PassThrough`, driven in tests by a fake input source. Fully testable with no desktop |
@@ -116,8 +116,10 @@ broken.
   decides who may arm a rectangle while a lower-priority incumbent keeps whatever it already holds.
   Those two sentences cannot both be true:* if the incumbent always keeps it, the winner is whoever
   published first, and the priority order does nothing. So a higher-priority claim **revokes** the
-  overlapping part of a lower-priority lease and the loser is **told** (`RegionsRevoked`, dispatched on
-  a worker).
+  overlapping part of a lower-priority lease and the loser is **told** — by one `GrantChanged`
+  carrying its whole current grant, on the control plane
+  ([ADR 0023](0023-the-control-plane-carries-state-not-deltas.md)), because a delta that the queue is
+  allowed to drop would desynchronize the module permanently.
 - **And a lease that is only ever taken has the same defect one step further on.**
   [ADR 0021](0021-requested-versus-granted-regions.md) is the second correction: Conduit keeps each
   module's **requested** set separately from its **granted** set and recomputes grants from
