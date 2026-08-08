@@ -623,10 +623,19 @@ gesture payload already carries the dragged `WindowRef` — Conduit owns the hoo
 is in a move/size loop — so the second stream bought nothing and cost a race. The window-event kind
 remains in the taxonomy for consumers that want raw move/size transitions; Zones is not one.
 
-Every one of these is a **request that can be refused**. A chord may already be held by another
-module or by Windows itself; the pointer gesture may be refused if another module holds an
-overlapping region (§7.3). Zones must remain useful when refused — which is why the wheel and the
-chords are alternative paths to the same capability rather than one depending on the other.
+**Every one of these is a request whose answer Zones does not control**, and the two kinds answer
+differently:
+
+- **A chord can be refused outright** — another module may hold it, or Windows itself may.
+- **A pointer gesture is not refused for overlap.** Contention with another module's regions is
+  **arbitrated**, so the publication is accepted and the *grant* may be partial or empty
+  ([ADR 0021](../../../../docs/decisions/0021-requested-versus-granted-regions.md)); what refuses the
+  whole publication is a malformed or over-quota request — `ModifierReserved`, `TooManyRegions`. And a
+  grant can shrink later without any refusal at all, when a higher-priority module claims the same
+  rectangles (§7.4).
+
+Zones must remain useful under every one of those outcomes — which is why the wheel and the chords are
+alternative paths to the same capability rather than one depending on the other.
 
 ### 8.3 Settings, v1
 
