@@ -1,0 +1,137 @@
+// -------------------------------------------------------------------------------------------------
+// COMPILES. First observed 2026-08-08 at commit 7aef6ff: GitHub Actions built every project on
+// Ubuntu (0 warnings, under TreatWarningsAsErrors) and on Windows, and the Core suites passed —
+// 45 tests, 0 failed. Authored without a local SDK, so the compiler was the first reader.
+//
+// That is a statement about COMPILATION and, where tests cover it, about pure logic. It is not a
+// statement about behaviour: no window has been placed, no hotkey registered, no monitor
+// enumerated, no tray icon shown, and no Shell adapter exists. Those come only from
+// docs/runbooks/manual-validation.md, performed by a human on a real Windows desktop.
+// -------------------------------------------------------------------------------------------------
+
+namespace Coordinator.Atlas;
+
+/// <summary>
+/// One cell of a layout, expressed as fractions of the work area rather than pixels.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Fractions, not pixels, because a layout has to mean the same thing on a 1080p panel and an
+/// ultrawide, and because the same template has to resolve correctly against every monitor in a
+/// mixed arrangement. A "left half" is 0.0 to 0.5 everywhere; what that is in pixels is a question
+/// only the work area can answer.
+/// </para>
+/// <para>
+/// Fractions are absolute positions within the work area, not sizes laid end to end — so the
+/// familiar question of whether a template's fractions "add up to one" does not arise. What does
+/// arise, and is deliberately <b>not</b> checked: nothing here prevents two cells overlapping or
+/// leaves of the work area being uncovered. Both are legitimate layouts, so refusing them would be
+/// inventing a rule; if a template author wants a check, that is a template-authoring feature and
+/// belongs where templates are authored.
+/// </para>
+/// </remarks>
+/// <param name="Id">
+/// A stable id for this cell within its template. Ends up in saved settings when a user assigns a
+/// window to a zone, so it is subject to the same never-rename discipline as every other id here.
+/// </param>
+/// <param name="Left">Left edge as a fraction of work-area width, from 0.0 to 1.0.</param>
+/// <param name="Top">Top edge as a fraction of work-area height, from 0.0 to 1.0.</param>
+/// <param name="Right">Right edge as a fraction, strictly greater than <paramref name="Left"/>.</param>
+/// <param name="Bottom">Bottom edge as a fraction, strictly greater than <paramref name="Top"/>.</param>
+public sealed record LayoutCell(
+    string Id,
+    double Left,
+    double Top,
+    double Right,
+    double Bottom);
+
+/// <summary>
+/// A named arrangement of cells, resolvable against any work area.
+/// </summary>
+/// <remarks>
+/// A template contains no pixels, no monitor, and no desktop — which is what makes resolving one
+/// pure arithmetic and therefore testable anywhere.
+/// </remarks>
+/// <param name="Id">Stable id, referenced by settings. Never renamed.</param>
+/// <param name="Name">Human-facing name. Free to change.</param>
+/// <param name="Cells">The cells, in the order zones should be numbered.</param>
+/// <param name="Padding">
+/// Pixels removed from every edge of the work area before any cell is resolved. Applied first so
+/// that padding never lands unevenly on the last zone.
+/// </param>
+/// <param name="Gap">
+/// Pixels of separation between adjacent zones, in the resolved result. Applied as half a gap
+/// inset on each interior edge, so two neighbours are exactly <c>Gap</c> apart while the outer
+/// edges of the layout stay flush with the padded work area. An odd gap loses a pixel to integer
+/// division, which is deliberate and preferable to a rounding rule that makes some pairs of zones
+/// closer than others.
+/// </param>
+public sealed record LayoutTemplate(
+    string Id,
+    string Name,
+    IReadOnlyList<LayoutCell> Cells,
+    int Padding = 0,
+    int Gap = 0)
+{
+    /// <summary>
+    /// The cells, in declaration order. <b>Copied at construction</b> — an
+    /// <see cref="IReadOnlyList{T}"/> parameter promises only that this reference has no mutators,
+    /// not that the caller's underlying <c>List&lt;LayoutCell&gt;</c> has stopped changing. A
+    /// template whose cells can be edited after resolution would make an already-resolved
+    /// <see cref="ZoneSet"/> disagree with the template it says it came from.
+    /// </summary>
+    public IReadOnlyList<LayoutCell> Cells { get; } =
+        System.Collections.Immutable.ImmutableArray.CreateRange(
+            Cells ?? throw new ArgumentNullException(nameof(Cells)));
+}
+
+/// <summary>
+/// One resolved zone: a real rectangle, in a named coordinate space.
+/// </summary>
+/// <param name="ZoneId">The originating cell's stable id.</param>
+/// <param name="Index">The zone's position in the template's cell order, from zero.</param>
+/// <param name="Bounds">The resolved rectangle.</param>
+/// <param name="Space">
+/// Which space <paramref name="Bounds"/> is in. Carried explicitly rather than assumed, because a
+/// rectangle whose space is ambiguous is the raw material of every window-placement bug.
+/// </param>
+public sealed record ZoneRect(
+    string ZoneId,
+    int Index,
+    Rect Bounds,
+    CoordinateSpace Space);
+
+/// <summary>
+/// A template resolved against one monitor's work area: the zone rectangles, plus enough context to
+/// know whether they are still valid.
+/// </summary>
+/// <remarks>
+/// The template and work area are kept alongside the zones so that a consumer holding a zone set
+/// can answer "where did these numbers come from" without a second lookup — and so that the
+/// generation check below has something to compare against.
+/// </remarks>
+/// <param name="Template">The template these zones came from.</param>
+/// <param name="WorkArea">The work area they were resolved against, before padding.</param>
+/// <param name="TopologyGeneration">
+/// The desktop topology generation current when this was computed. <b>A zone set must not be
+/// applied at a later generation than the one it was computed at</b> — recompute instead. A layout
+/// derived from a work area that no longer exists is not approximately right, it is arbitrary, and
+/// carrying the generation is what turns that from an invisible mistake into a comparison.
+/// </param>
+/// <param name="Zones">The resolved rectangles, in template order.</param>
+public sealed record ZoneSet(
+    LayoutTemplate Template,
+    Rect WorkArea,
+    int TopologyGeneration,
+    IReadOnlyList<ZoneRect> Zones)
+{
+    /// <summary>
+    /// The resolved rectangles, in template order. <b>Copied at construction</b>, for the same
+    /// reason as <see cref="LayoutTemplate.Cells"/>: a zone set is handed to a drag loop that will
+    /// hit-test against it on every mouse move, and geometry that can change underneath that loop
+    /// produces a window landing somewhere nobody chose.
+    /// </summary>
+    public IReadOnlyList<ZoneRect> Zones { get; } =
+        System.Collections.Immutable.ImmutableArray.CreateRange(
+            Zones ?? throw new ArgumentNullException(nameof(Zones)));
+}

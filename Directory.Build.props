@@ -1,0 +1,81 @@
+<Project>
+
+  <!--
+    Windows Coordinator — shared MSBuild properties.
+
+    MSBuild imports this file into every project below it, so a property set here is set once for
+    the whole repository. That matters more than usual for this project: the Core/Shell split
+    (ADR 0003) means there will eventually be two projects per module and per pillar, and a setting
+    that has to be repeated per project is a setting that will eventually disagree with itself.
+
+    EVALUATED BY MSBUILD, AND THE SETTINGS HOLD. GitHub Actions built every project on Ubuntu and
+    Windows at 7aef6ff (2026-08-08) with **0 warnings** — which is the interesting part, because
+    TreatWarningsAsErrors below means a single warning anywhere would have failed the build. These
+    are no longer intentions. Still never evaluated on a developer machine (no local SDK, TD-1).
+
+    Deliberately NOT set here:
+      * TargetFramework — each project declares its own. Core projects are `net9.0` with no Windows
+        suffix; that is the whole point of the split, and the `boundary` check in tools/doc-audit
+        reads the declared framework to classify a project. Setting it centrally would erase the
+        distinction the check depends on.
+      * EnforceCodeStyleInBuild — left off (the default). With TreatWarningsAsErrors below, turning
+        it on would promote every .editorconfig style preference into a build break. Style is
+        corrected by `dotnet format` and by review; it does not get to fail a build.
+      * GenerateDocumentationFile — left off (the default). Turning it on enables CS1591 ("missing
+        XML comment"), which TreatWarningsAsErrors would then make an error on every public member
+        that lacks one. The contract types are documented because the contract needs explaining, not
+        because a compiler flag demanded it. Revisit if these assemblies are ever published.
+  -->
+
+  <PropertyGroup>
+
+    <!-- Latest language version. The contract types lean on records, record structs and file-scoped
+         namespaces; pinning an older version buys compatibility with a toolchain nobody here uses. -->
+    <LangVersion>latest</LangVersion>
+
+    <!-- Nullable reference types on, everywhere, from the first line of code. Retrofitting nullable
+         annotations onto an existing codebase is a slog; starting with them costs nothing. In a
+         project whose central promise is that Core logic is verifiable, "can this be null?" being
+         answered by the type rather than by a comment is not a style choice. -->
+    <Nullable>enable</Nullable>
+
+    <!-- Implicit usings: System, System.Collections.Generic, System.IO, System.Linq,
+         System.Net.Http, System.Threading and System.Threading.Tasks are in scope without a
+         `using`. This also keeps the explicit `using` list in each file short and meaningful, which
+         matters because the `boundary` check reads those directives as TEXT to enforce the
+         Core/Shell split — the fewer routine imports there are, the more visible an import that
+         breaks the rule becomes. -->
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Warnings are errors. A warning nobody has to fix is a warning nobody reads, and this
+         project's evidence standard (docs/OPERATING_MODEL.md) is specifically about not letting a
+         signal degrade into noise. Expect this to bite on the first compile — that is the point:
+         it is cheaper to answer the compiler now than to inherit two hundred accumulated warnings
+         later. If a specific warning is genuinely wrong for a genuine reason, suppress THAT warning
+         with a comment saying why; do not turn this off. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- One authoritative version for the whole product, because the update/delivery channel
+         (ADR 0008) compares exactly one number to decide whether an installed copy is behind. Every
+         assembly and every package produced from this repository carries this value; a module does
+         not version independently, because a module does not ship independently.
+         0.1.0 = "bootstrapped, nothing compiled" — it moves the first time something builds. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+
+    <!-- Product identity, shared so the tray, the Shell's about surface and the installer cannot
+         drift apart. Deliberately no company/copyright boilerplate: this is a personal toolbox. -->
+    <Product>Windows Coordinator</Product>
+    <Authors>Windows Coordinator</Authors>
+
+    <!-- Determinism and a clean, repeatable build. Continuous-integration-friendly and, more to the
+         point here, it means two builds of the same source produce the same bytes — which is what
+         makes "is the installed copy actually the build I made?" an answerable question. -->
+    <Deterministic>true</Deterministic>
+
+    <!-- Neutral culture and invariant-safe defaults for Core logic. Geometry and schedule
+         arithmetic must not change behaviour because a machine is set to a different locale. -->
+    <NeutralLanguage>en-US</NeutralLanguage>
+
+  </PropertyGroup>
+
+</Project>

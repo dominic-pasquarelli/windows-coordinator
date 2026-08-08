@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreCompact\",\"additionalContext\":\"PRE-COMPACTION FLUSH: the summary is about to drop conversational detail - the reasoning you never wrote down, the thing you decided 40 messages ago, the dead end you must not walk into again. Before it does, run a full documentation sweep: update docs/NEXT.md (the resume anchor - it must name a specific next action), sweep every doc and ADR this session touched and bump their updated flags, write down any decision that is not recorded anywhere (an ADR in docs/decisions/, or a docs/INBOX.md capture if it is not settled), run coord audit (and coord audit --since origin/main), and commit. The goal: a post-compaction reader resumes from CURRENT DOCS, not from a lossy summary. And hold the evidence standard while you write - say not compiled, never builds or works, about any C#. See the CLAUDE.md working agreement: Flush to docs before compaction.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

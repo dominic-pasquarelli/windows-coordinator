@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Coordinator.Conduit.Core — the Core half of the input and trigger fabric.
+
+    CORE project: `net9.0`, no Windows suffix, zero Windows dependencies. It holds the declarative
+    model — what a module asks to be woken for, and what answer it gets back — and none of the
+    machinery that satisfies it. No hotkey registration, no hooks, no timers, no tray icon: those
+    belong to a Windows-targeted adapter project that does not exist yet (docs/CONDUIT.md §6 calls
+    it Coordinator.Conduit.Shell).
+
+    That absence is the point of the split (ADR 0003): arbitration — the two-modules-one-chord case
+    this pillar exists for — is a decision over values, so it is testable on any operating system,
+    in a container, with no desktop present. The `boundary` check in tools/doc-audit classifies this
+    as a Core project from the declared target framework below, and will fail the gate on a
+    P/Invoke or a Windows namespace appearing here.
+
+    COMPILES. Built by GitHub Actions on Ubuntu and Windows at 7aef6ff (2026-08-08), 0 warnings.
+    NOT yet covered by any test — the arbiter it exists for is unwritten (docs/NEXT.md).
+
+    Shared properties come from Directory.Build.props at the repository root.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Coordinator.Conduit</RootNamespace>
+    <AssemblyName>Coordinator.Conduit.Core</AssemblyName>
+    <Description>Windows Coordinator — Conduit (Core): trigger intents, registration outcomes including first-class refusal, and the dispatch shape. Names no input mechanism.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A trigger intent names the capability it will dispatch to, so this project needs the
+         platform's CapabilityId. The dependency runs one way — pillar to platform, never the
+         reverse — which is what keeps the graph acyclic and what the boundary check enforces.
+         A pillar referencing a MODULE would be a violation; referencing the platform is not. -->
+    <ProjectReference Include="..\..\..\platform\Coordinator.Platform.Core\Coordinator.Platform.Core.csproj" />
+  </ItemGroup>
+
+</Project>
