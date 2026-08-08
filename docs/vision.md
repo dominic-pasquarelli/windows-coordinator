@@ -53,6 +53,26 @@ about four times and never needed is still parked; see the authority warning in
 
 ---
 
+## The Zones tab strip — named, gated, and deliberately not in M1
+
+Stacking ([ADR 0012](decisions/0012-zones-stacking-model.md)) makes a zone a container with depth,
+and M1 ships it with almost no visual affordance: the drag overlay shows each zone's depth while you
+are dragging, and nothing shows it otherwise.
+
+The obvious answer is a **tab strip** — a thin always-on-top band at the top of a stacked zone, one
+tab per window, bare wheel over it cycling. It would solve discoverability completely and would make
+the feature legible to someone who has never read a word of documentation.
+
+It is not in M1 because it is a large piece of Windows UI for a feature that has never been used in
+anger. The strip must follow its zone through moves and layout changes, survive per-monitor DPI
+changes, hide when something goes fullscreen, never steal a click, never appear in Alt-Tab or on the
+taskbar, and repaint without flicker. Every one of those is a place a resident tray utility can start
+making the desktop worse.
+
+**The gate:** stacking is in daily use, and its invisibility is the top complaint about it. Tracked
+as **TD-13** in [TECH_DEBT.md](TECH_DEBT.md) — which is the recall hook, so this cannot be quietly
+forgotten.
+
 ## Parked module ideas
 
 Six, all deliberately unbuilt. Each names what it would be and, more usefully, **which pillar it

@@ -123,6 +123,106 @@ differently wrong.
 
 ---
 
+### 3.1 Two monitor identifiers, and they are not interchangeable
+
+| | `MonitorId` | `MonitorKey` |
+|---|---|---|
+| Scope | one snapshot / topology generation | across restarts, docks, driver updates |
+| Derived from | whatever the enumeration returned | display device path plus EDID identity |
+| Use for | lookup **within** a snapshot | **anything persisted** |
+
+**Nothing persists a `MonitorId`.** A settings file keyed on a snapshot-local handle is a settings
+file whose keys stop meaning anything after a reboot, and the failure is silent — layouts simply stop
+applying, or apply to the wrong screen.
+
+A `MonitorKey` carries its **confidence**: `Stable` when EDID gives a serial, `Positional` when it
+does not and the key falls back on connector position (which a cable swap invalidates). Two identical
+monitors with no serial are genuinely indistinguishable, so a consumer matching a `Positional` key
+may be wrong — and the contract is that it **says so and falls back** rather than guessing.
+([ADR 0015](decisions/0015-zone-addressing-and-durable-monitor-identity.md))
+
+### 3.2 Windows are ordered front-to-back
+
+`DesktopSnapshot.Windows` is in **z-order, frontmost first**. This is a real property of the platform
+enumeration rather than a computation, and it is what lets a consumer answer "which of *these* windows
+is on top" — the question a stacking module has to ask after the user clicks a taskbar button, and
+which is otherwise unanswerable without caching state the OS already owns.
+
+### 3.3 The cursor and the foreground window are desktop facts too
+
+Both are defined here, sampled here, and delivered to modules by
+[Conduit](CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context) as part of an
+invocation context. **Foreground** is the OS's foreground top-level window resolved to a `WindowRef`,
+or `null` — and null is ordinary rather than exceptional: the desktop itself can hold focus, and a
+secure or elevated window may not be resolvable.
+
+They are exposed as a **point sample** rather than as snapshot fields. A snapshot is expensive and is
+taken *after* a module starts running, which answers "where is the cursor now" when the question was
+"where was it when the user pressed the key".
+
+**And a point sample is not available everywhere**, which forces a second delivery path. Conduit
+captures the invocation context at *recognition*, and for a hook-thread recognizer that happens inside
+a microsecond budget where calling Atlas is forbidden outright
+([CONDUIT §5.2](CONDUIT.md#52-what-may-happen-inside-a-hook-callback)). So Atlas additionally
+**publishes an immutable `DesktopFacts` record** — foreground window, monitor geometry, topology
+generation, a monotonic sequence number — and republishes it whenever the foreground window or the
+topology changes. The record itself follows
+[CONDUIT §3.6](CONDUIT.md#36-pointer-gesture)'s publication contract — immutable value, atomic
+reference swap, lifetime owned by the reader's side — so the hook thread's read is a reference load
+with a known worst case.
+
+**Every publication goes through one Atlas-owned sequencer**, which **samples the live facts,
+allocates the sequence, and swaps the record as one ordered operation**
+([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)). Neither the event path
+nor the heartbeat publishes on its own — both *request* publication and carry no sample.
+
+That is not ceremony. With two independent writers, a heartbeat that sampled the foreground, lost the
+CPU while an event published a newer one, and then swapped its own stale sample under a **higher**
+sequence would leave the record reading older content with a newer number — inverting the one rule
+consumers are given. Sampling inside the sequenced region makes it unrepresentable: **a higher
+`Sequence` was sampled later, always.** The sequencer is a serial agent rather than a lock callers
+hold, so nobody blocks on it and no enumeration is performed under a caller's lock; the hook thread
+still only ever does a single atomic load.
+
+**Atlas also heartbeats it**, on a fixed interval, and the heartbeat's publication **re-samples the
+foreground window** rather than reissuing the previous record. Both halves of that matter, for
+different reasons:
+
+- **Publishing on an interval at all** exists because `DesktopFacts` is event-driven: on a desktop
+  nobody is touching, a record can be an hour old and completely correct, so *age cannot be the
+  staleness test*. Without a heartbeat, "nothing has changed" and "Atlas stopped publishing" are the
+  same observation, and any age threshold would eventually reject every hook gesture on a stable
+  desktop — the feature failing *because* things were calm.
+- **Re-sampling** exists because a liveness-only heartbeat would keep certifying a **wrong** record as
+  live. If a foreground-change notification is ever missed, a heartbeat that reissues the previous
+  value advances the sequence forever over stale content. Re-reading the foreground bounds that: a
+  missed publication is repaired within one interval, and Atlas **counts** each repair, because
+  self-healing with no trace hides a broken event path. **An event request names the foreground it was
+  notified about**, and a publication is counted as a heartbeat correction when the sampled foreground
+  **was named by no request in the batch** — precise enough to still count a missed change to Y while
+  an event was reporting X, which a coarser "was any request event-driven?" rule would suppress. It
+  can over-count under rapid switching (a notification still in flight), which is the safe direction
+  for a health signal and the reason it is read as a rate
+  ([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)).
+
+**Only the foreground is re-sampled, and the asymmetry is the argument.** Reading it is one call;
+enumerating monitors is what a snapshot is for. More importantly, a consumer *can* detect a missed
+topology update — `TopologyGeneration` travels on the context and a snapshot read compares it — and
+*cannot* detect a wrong foreground by any means. **The fact nobody downstream can validate is the one
+the publisher has to repair.**
+
+**This is §4's rule about snapshots, applied to a second surface.** A snapshot is stamped but never
+self-aging, and freshness is computed by the reader; here the producer likewise never asserts "this is
+fresh". It asserts *which publication this is*, *that publication is still running*, and — for the one
+field nobody else can check — *that it was actually looked at this interval*
+([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
+
+The two paths answer different questions and the difference is deliberate: a point sample is *live but
+only where it is safe to take one*; the published record is *safe to read anywhere, and identified by
+sequence rather than by freshness*.
+
+---
+
 ## 4. The snapshot contract
 
 **A module reads one snapshot. It does not issue queries.**
@@ -192,15 +292,23 @@ temptation is to re-read the desktop on every mouse move. That is a full enumera
 interaction path, at mouse-event frequency, and it is precisely what
 [principle 7 — *resolve once, execute cheap*](COORDINATOR.md#7-non-negotiable-principles) forbids.
 
-The design instead: **take one snapshot at `MoveSizeStart`, resolve the zone rectangles once, and
+The design instead: **take one snapshot when the drag starts, resolve the zone rectangles once, and
 run the entire drag against pre-computed geometry.** Hit-testing the cursor against a resolved
 `ZoneSet` is comparison arithmetic. The only thing that can invalidate it mid-drag is a topology
 generation bump, which is rare, detectable, and can be handled by recomputing once rather than
 continuously.
 
-This is where the two pillars interlock most tightly: Conduit's guarantee that `MoveSizeEnd` always
-follows `MoveSizeStart` ([CONDUIT.md §3.2](CONDUIT.md)) is what makes a snapshot held across a drag
-safe to release.
+This is where the two pillars interlock most tightly, and **which Conduit stream marks the boundaries
+is what makes the held snapshot safe to release.** A drag consumer subscribes to the **input gesture**
+kind, whose `Started`/`Ended` pairing is the cleanup guarantee: exactly one `Ended` per `Started`, so
+the snapshot taken at the start always has exactly one release point. The window-event pair
+`MoveSizeStart`/`MoveSizeEnd` carries a similar guarantee
+([CONDUIT §3.2](CONDUIT.md#32-window-event)) and remains available for consumers that want raw
+move/size transitions — but **a consumer picks one stream and holds the snapshot against that one**.
+Composing both to bracket a single drag is what
+[ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md) forbids: there is no ordering
+between intent streams, so two candidate release points race, and the failure mode is a snapshot
+released while the drag is still reading it.
 
 ---
 
@@ -328,6 +436,11 @@ our control, and individually easy to swallow.
 
 - It will not steal focus as a side effect of placement. Moving a window is not activating it.
 - It will not reorder z-order beyond what the move itself requires.
+
+> **These two are about placement, and they stand.** Raising and activating are available as
+> **explicit, separately-requested operations** (§7.4) — which is the distinction these bullets were
+> always drawing. A caller that asked to move a window has not asked for its focus to change; a
+> caller that asked to raise one has. [ADR 0014](decisions/0014-atlas-explicit-raise-and-activate.md).
 - It will not move a window the user is actively dragging, except as the committed result of an
   explicit gesture ([CONDUIT.md §3.5](CONDUIT.md)).
 - It will not persist anything. Where a window "should" be is a module's settings, not desktop truth.
@@ -354,6 +467,41 @@ stronger than its evidence* in its purest form: the call succeeded, and the wind
 Atlas re-reads the geometry after placing and reports what is actually true. A module that snapped
 three windows and got `PlacedDifferently` for one of them can tell the user something useful; a
 module that got three `true` values cannot.
+
+---
+
+### 7.4 Raise and activate — explicit operations, and the foreground lock
+
+Two operations beyond placement, added for Zones' stack cycling
+([ADR 0014](decisions/0014-atlas-explicit-raise-and-activate.md)) and deliberately kept separate:
+
+| Operation | What it does | Reliability |
+|---|---|---|
+| `Raise(window)` | z-order only — the window comes in front of its overlapping siblings. **Focus is untouched** | Needs no foreground rights. Expected to work |
+| `Show(window)` | restore if minimised, then raise | Needs no foreground rights. Expected to work |
+| `Activate(window)` | `Show`, then request foreground | **May be refused by the operating system** |
+
+`Show` exists because a caller cycling through a stack must not select a window the user cannot see,
+and restore-then-raise as two separate calls leaves a window briefly in neither state
+([ADR 0016](decisions/0016-zone-occupancy-member-states.md)). It never re-minimises on the way past —
+silently changing a window's state is the surprise this contract avoids everywhere else.
+
+**The foreground lock is the reason these are two operations and not one.** Windows restricts
+`SetForegroundWindow`: a process that has not recently received input generally cannot take
+foreground, and the call fails quietly or merely flashes a taskbar button. Coordinator activating
+another application's window, in response to input delivered over a third application's window, is
+squarely in the territory that restriction exists to police — and whether it is permitted is not
+knowable from documentation with confidence. It is `Z-4` in
+[manual-validation.md](runbooks/manual-validation.md), and it is the cheapest large unknown in the
+whole project to resolve.
+
+A refusal is `Refused(ForegroundLocked)` — a member of §7.3's set, surfaced like every other. Atlas
+does not retry, does not synthesise input, and does not attach thread input to work around it:
+fighting a deliberate OS protection is how a productivity tool becomes the thing that breaks on a
+Windows update.
+
+**Raise still cannot promise visibility.** Another application's always-on-top window will still
+cover the raised one. Reported honestly rather than retried.
 
 ---
 
@@ -387,28 +535,22 @@ at different scale factors, and nothing else substitutes for them.
 
 ---
 
-## 9. Status — designed and documented, not built
+## 9. Status — the model compiles and its arithmetic is tested; nothing observes the desktop
 
-**No Atlas code exists.** There is no project, no namespace, no type, no test. What exists is this
-document and [`src/pillars/atlas/README.md`](../src/pillars/atlas/README.md).
+**`Coordinator.Atlas.Core` exists, compiles, and is tested.** The model types, coordinate-space
+geometry and the layout math are real code; CI built them on Ubuntu and Windows at `7aef6ff`
+(2026-08-08) with 0 warnings, and `Coordinator.Atlas.Core.Tests` passes **25 tests** across the zone
+arithmetic and the snapshot immutability guarantee. That suite runs on a Linux runner with no monitor
+attached, which is the Core/Shell split paying for itself.
 
-Both honesty statements apply, and both are required whenever this pillar's status is described:
+**Nothing here has ever looked at a desktop.** There is no `Coordinator.Atlas.Shell`: no monitor has
+been enumerated, no window moved, no DPI transition observed, no z-order read, no cursor sampled.
+Every rule on this page about *what Windows does* is a specification the implementation will be held
+to — backed by documented API behaviour, not by observation.
 
-1. **Nothing here has been compiled.** The bootstrap environment had Python 3.11 and Node and **no
-   .NET SDK**. The sketches on this page have never been through a compiler. The Python tooling
-   (`tools/coord/coord.py`, `tools/doc-audit/audit.py`) *has* been executed and its results are
-   real; nothing C#-shaped in this repository shares that status.
-2. **Nothing here has been measured.** No monitor has been enumerated, no window moved, no DPI
-   transition observed. Every rule above is a specification the implementation will be held to.
-
-**Where it sits in the plan.** [COORDINATOR.md §8](COORDINATOR.md) puts Atlas in **P2 — Conduit and
-Atlas, minimum viable**, gated on Core tests covering the geometry math plus a manual run on Windows
-reading a real multi-monitor topology correctly, *including one non-100% scaling monitor*. That
-qualifier is the point of the gate — a single-monitor pass would be a check that cannot fail. The
-live task list is [NEXT.md](NEXT.md); this pillar's resume instructions are in its
-[README](../src/pillars/atlas/README.md).
-
----
+The distinction to keep: the **arithmetic** is verified, the **observation** does not exist. A green
+test run here says the layout math is right, and says nothing whatsoever about whether a window ever
+lands where it was asked to go.
 
 ## 10. Open questions and known dragons
 

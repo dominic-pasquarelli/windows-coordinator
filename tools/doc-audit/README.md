@@ -41,8 +41,10 @@ claimed outcome actually occurred ([OPERATING_MODEL §7](../../docs/OPERATING_MO
 about links, paths, frontmatter, the ADR sequence and the generated map is real, and its findings are
 about files that really are or are not on disk.
 
-**No .NET SDK has ever been present in the environment this project was authored in, and not one
-line of its C# has been compiled.** The `boundary` check reads `using` directives, namespace
+**No .NET SDK is present in the environment this project is authored in, so this checker never has a
+compiler available.** (CI does: as of `7aef6ff` it compiles every project on Ubuntu and Windows. That
+does not soften anything below — this tool's answer is textual either way, on every machine.) The
+`boundary` check reads `using` directives, namespace
 declarations, `[DllImport]` attributes and `.csproj` `<ProjectReference>` elements as *text*. It does
 genuine work — it will catch Win32 leaking into a Core project — but a green boundary result means
 *"the obvious leaks are absent"*, never *"the boundary is proven"*, and a green audit is never a
@@ -93,7 +95,7 @@ working-tree edits are therefore not covered — commit first if you meant to ch
 
 ## What it checks
 
-Fifteen checks. The ids are stable, and **this table is their single canonical home** —
+Sixteen checks. The ids are stable, and **this table is their single canonical home** —
 [AUDIT.md §8](../../docs/AUDIT.md) discusses what the mechanical half can and cannot judge, and
 links here for the list itself rather than keeping a second copy.
 
@@ -107,6 +109,7 @@ links here for the list itself rather than keeping a second copy.
 | `adr-gap` | ERROR | A gap or a duplicate in the `docs/decisions/NNNN-…` sequence. |
 | `adr-format` | ERROR | An ADR missing its `Date:` or `Status:` header — without which it is invisible to the lifecycle checks. |
 | `boundary` | ERROR | Platform-side code referencing a module; a module referencing another module; Windows inside a **Core** project. The modularity teeth — see below. |
+| `projectref` | ERROR | A `<ProjectReference>` pointing at a `.csproj` that does not exist. Cheap, and it catches the exact regression that motivated it: a project renamed without updating the generator that emits references to it. Textual, so it works with no compiler — which is the point, because without a compiler nothing else would notice until CI. |
 | `shelving` | WARN | A module or pillar directory with no `README.md`, or a README with no **"Where to resume"** section. |
 | `updated-flag` | ERROR *(`--since` only)* | A doc changed on the branch whose `updated` **did not move forward** — which covers both shapes of the same lie: left unchanged, and *moved backward*. An unchanged value is **accepted when it already equals today** (a date is day-granular and cannot advance twice in one day). Both dates must be well-formed for the comparison to mean anything; adding a date where the base revision had none is an improvement, not drift. |
 | `doc-touch` | WARN *(`--since` only)* | Code changed under an area with no doc under that area touched. |

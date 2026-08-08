@@ -120,5 +120,109 @@ class ScaffoldTests(unittest.TestCase):
                                     f"new-module accepted the invalid name {bad!r}")
 
 
+
+class DesignFirstScaffoldTests(unittest.TestCase):
+    """A module starts as a design before it starts as code.
+
+    docs/MODULE_SPEC.md says to write the spec first, and Zones was specified in full before the
+    module host that would load it existed. So `coord new-module` has to be able to fill in the code
+    around a directory that already holds documentation — while never touching a file a human wrote,
+    and while still refusing to clobber real code.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name) / "repo"
+        _copy_repo(self.repo)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_fills_in_code_around_a_docs_only_module_without_touching_the_docs(self) -> None:
+        mod = self.repo / "src" / "modules" / "designfirst"
+        (mod / "docs").mkdir(parents=True)
+        readme = mod / "README.md"
+        arch = mod / "docs" / "ARCHITECTURE.md"
+        readme.write_text("hand-written front door\n", encoding="utf-8")
+        arch.write_text("hand-written design\n", encoding="utf-8")
+
+        result = _run_new_module(self.repo, "designfirst")
+        self.assertEqual(result.returncode, 0,
+                         f"refused a docs-only module\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+
+        # The code arrived...
+        self.assertTrue((mod / "Coordinator.Designfirst.Core"
+                             / "Coordinator.Designfirst.Core.csproj").exists())
+        # ...and the prose is byte-for-byte what it was.
+        self.assertEqual(readme.read_text(encoding="utf-8"), "hand-written front door\n")
+        self.assertEqual(arch.read_text(encoding="utf-8"), "hand-written design\n")
+
+    def test_still_refuses_when_real_code_exists(self) -> None:
+        """The guard that actually matters must not have been weakened into uselessness."""
+        first = _run_new_module(self.repo, "hascode")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = _run_new_module(self.repo, "hascode")
+        self.assertNotEqual(second.returncode, 0,
+                            "scaffolded over a module that already had project files")
+        combined = (second.stdout + second.stderr).lower()
+        self.assertIn("not documentation", combined)
+        self.assertIn(".csproj", combined, "the refusal should name what it found")
+
+
+class OrphanCodeGuardTests(unittest.TestCase):
+    """"Documentation only" must be an allow-list, not "contains no .csproj".
+
+    The first version of the design-first guard tested for the absence of a project file, so a
+    directory holding orphan .cs or .xaml was accepted — and the tool then printed "holds
+    documentation only" while scaffolding around real work. A guard whose predicate is broader than
+    its claim passes for reasons its own message does not admit. Reported in review of PR #2.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name) / "repo"
+        _copy_repo(self.repo)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _expect_refusal(self, name: str, path: Path, body: str = "// orphan\n") -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        result = _run_new_module(self.repo, name)
+        self.assertNotEqual(
+            result.returncode, 0,
+            f"scaffolded around orphan code at {path.relative_to(self.repo)}\n{result.stdout}")
+        self.assertNotIn("documentation only", result.stdout,
+                         "claimed the directory was documentation only while it held code")
+        self.assertEqual(body, path.read_text(encoding="utf-8"), "the orphan file was modified")
+
+    def test_refuses_orphan_cs_in_the_module_directory(self) -> None:
+        self._expect_refusal("orphancs",
+                             self.repo / "src" / "modules" / "orphancs" / "Half.cs")
+
+    def test_refuses_orphan_xaml_nested_in_the_module_directory(self) -> None:
+        self._expect_refusal("orphanxaml",
+                             self.repo / "src" / "modules" / "orphanxaml" / "ui" / "Page.xaml",
+                             "<Page/>\n")
+
+    def test_refuses_orphan_code_in_the_TEST_directory(self) -> None:
+        """The tests directory is a separate tree and was unguarded in the first version."""
+        self._expect_refusal("orphantests",
+                             self.repo / "tests" / "Coordinator.Orphantests.Core.Tests" / "Old.cs")
+
+    def test_refuses_a_stray_non_doc_file_under_docs(self) -> None:
+        self._expect_refusal("orphandocs",
+                             self.repo / "src" / "modules" / "orphandocs" / "docs" / "notes.txt",
+                             "notes\n")
+
+    def test_still_accepts_the_real_documentation_only_shape(self) -> None:
+        """Guard the guard: the allow-list must not have been tightened into uselessness."""
+        mod = self.repo / "src" / "modules" / "docsonly"
+        (mod / "docs").mkdir(parents=True)
+        (mod / "README.md").write_text("front door\n", encoding="utf-8")
+        (mod / "docs" / "ARCHITECTURE.md").write_text("design\n", encoding="utf-8")
+        (mod / "docs" / "diagram.svg").write_text("<svg/>\n", encoding="utf-8")
+        result = _run_new_module(self.repo, "docsonly")
+        self.assertEqual(result.returncode, 0,
+                         f"refused a genuinely docs-only module\n{result.stdout}\n{result.stderr}")
+        self.assertEqual((mod / "README.md").read_text(encoding="utf-8"), "front door\n")
+
 if __name__ == "__main__":
     unittest.main()

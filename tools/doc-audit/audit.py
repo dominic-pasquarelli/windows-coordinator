@@ -13,9 +13,11 @@ does this claim outrun its evidence? Those are the six lenses in docs/AUDIT.md �
 to make the mechanical drift **free to find**, so the audit's scarce attention goes where only
 judgement helps.
 
-⚠ **What a green run means here.** No .NET SDK has ever been present in the environment this project
-was authored in — not one line of its C# has been compiled. The `boundary` check is real and it does
-genuine work, but it reads *text*: `using` directives, namespace declarations, `[DllImport]`
+⚠ **What a green run means here.** No .NET SDK is present in the environment this project is authored
+in, so this checker never has a compiler available. CI does — as of `7aef6ff` it compiles every project
+on Ubuntu and Windows — and that changes nothing about the paragraph below, because this tool's answer
+is textual on every machine. The `boundary` check is real and it does genuine
+work, but it reads *text*: `using` directives, namespace declarations, `[DllImport]`
 attributes, and `.csproj` `ProjectReference` elements. A green boundary result means "the obvious
 leaks are absent". It never means "the boundary is proven", and a green audit is never a green build
 ([docs/OPERATING_MODEL.md](../../docs/OPERATING_MODEL.md) §7).
@@ -530,7 +532,7 @@ def check_adr_lifecycle(rep: Report) -> None:
 
 # --- checks: the modularity boundary (the teeth) -------------------------------------------------
 #
-# Everything below reads TEXT, because nothing here has been compiled. That is a real limitation and
+# Everything below reads TEXT, because this tool runs where no compiler does. That is a real limitation and
 # it is recorded as TD-3, not glossed: the check is defeated by reflection, by a fully-qualified type
 # name written inline, by a source generator, or by a package that drags Windows types in
 # transitively. It still catches the ordinary way the rule gets broken, which is someone adding an
@@ -778,16 +780,49 @@ def check_shelving(rep: Report) -> None:
 
 # --- checks: accuracy, orphans, the inbox --------------------------------------------------------
 
-def _repo_commits_since(date_str: str) -> int | None:
-    """Repo commits since the start of a `YYYY-MM-DD` date, or None when git cannot answer.
+def _commits_since_audit(path: Path, audited: str) -> int | None:
+    """Repo commits since the audit itself, or None when git cannot answer.
+
+    **Anchored to the commit that set `audited`, not to midnight on that date.** Counting from the
+    date is wrong whenever more than one commit lands in a day: it counts the commits that came
+    *before* the audit as evidence that the audit is stale, so a doc confirmed at the end of a busy
+    day is reported stale the next morning with nothing having changed since. The date is
+    day-granular; the audit is an instant, and only git knows which.
+
+    So: find the commit that most recently introduced this doc's current `audited:` line, and count
+    from there. Exact whenever the stamp's VALUE changed, which is every audit on a later day.
+
+    ⚠ **The one case git cannot answer: a re-audit that leaves the value unchanged.** Re-stamping
+    `audited: 2026-08-08` over an identical line produces no diff, so no git query can find it — the
+    information does not exist in the repository. The anchor then resolves to whenever that value
+    was *first* set. That is why the caller ALSO skips this arm while `audited` is today: on a
+    project whose history is one calendar day, a same-day re-audit is exactly this undetectable
+    case, and charging it for the day's earlier commits is the defect this function exists to
+    remove. Recording the audit's commit in frontmatter is the real fix; it is a schema change, so
+    it is proposed in TECH_DEBT (**TD-15**) rather than smuggled in here.
 
     ⚠ This is the ONE place a git failure is deliberately softened, and the asymmetry is the point.
     Staleness is an advisory churn signal that never gates, so an unavailable count degrades to
-    "unknown". The CLOSEOUT check is the exact opposite: there, a git failure is an ERROR, because a
-    gate that could not run must never report as a gate that passed.
+    "unknown" (`None`) and the caller drops the commit arm. The CLOSEOUT check is the exact
+    opposite: there, a git failure is an ERROR, because a gate that could not run must never report
+    as a gate that passed.
     """
     try:
-        out = _git(["rev-list", "--count", f"--since={date_str} 00:00:00", "HEAD"])
+        rel = str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return None
+    try:
+        # -S counts occurrences of the literal line, so the newest hit is where this value was set.
+        out = _git(["log", "-1", "--format=%H", "-S", f"audited: {audited}", "--", rel])
+    except GitError:
+        return None
+    anchor = out.strip()
+    if not anchor:
+        # The stamp is not committed yet (or the file is untracked): there is no "since" to measure,
+        # and guessing from the date would reintroduce exactly the defect above.
+        return None
+    try:
+        out = _git(["rev-list", "--count", f"{anchor}..HEAD"])
     except GitError:
         return None
     try:
@@ -831,12 +866,20 @@ def check_accuracy(rep: Report) -> None:
         except ValueError:
             continue                                   # an invalid date is check_frontmatter's job
         age = (today - ad).days
-        commits = _repo_commits_since(str(audited))
         reasons = []
         if age > STALE_DAYS:
             reasons.append(f"{age}d since the last accuracy pass")
-        if commits is not None and commits > STALE_COMMITS:
-            reasons.append(f"{commits} commits since")
+        # Two mitigations, because the defect has two offsets and neither alone covers both:
+        #   * the count is anchored to the commit that SET `audited`, not to midnight on its date,
+        #     so an audit is never charged for commits that preceded it (see _commits_since_audit);
+        #   * and the arm is skipped entirely while `audited` is today, because a same-day re-audit
+        #     leaves no diff and is therefore invisible to the anchor lookup above.
+        # Both are "a check that cannot pass" — OPERATING_MODEL §7's mirror image — at day zero and
+        # at day one respectively. The residue is TD-15: a date cannot express an instant.
+        if age > 0:
+            commits = _commits_since_audit(p, str(audited))
+            if commits is not None and commits > STALE_COMMITS:
+                reasons.append(f"{commits} commits since")
         if reasons:
             rep.add("warn", "accuracy", rel, None,
                     f"accuracy stale ({'; '.join(reasons)}; audited {audited})",

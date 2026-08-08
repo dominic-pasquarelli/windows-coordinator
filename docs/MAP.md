@@ -44,6 +44,11 @@ related:
 
 - [Modules — where the product lives](../src/modules/README.md) · `src/modules/README.md` — living · 2026-08-08
 
+### zones
+
+- [Zones — module front door](../src/modules/zones/README.md) · `src/modules/zones/README.md` — living · 2026-08-08
+- [Zones — internal design](../src/modules/zones/docs/ARCHITECTURE.md) · `src/modules/zones/docs/ARCHITECTURE.md` — living · 2026-08-08
+
 ## Tools — the developer plane
 
 - [Tests — Core test projects, runnable on any OS](../tests/README.md) · `tests/README.md` — living · 2026-08-08
@@ -82,7 +87,7 @@ related:
 
 ## Decisions (ADRs)
 
-The unified decision log (11 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
+The unified decision log (24 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
 
 - [ADR 0001 — Adopt the Axon documentation and operating protocols](decisions/0001-adopt-the-axon-documentation-and-operating-protocols.md)
 - [ADR 0002 — C# / .NET 9 and WinUI 3 as the stack](decisions/0002-csharp-dotnet9-and-winui3-as-the-stack.md)
@@ -95,3 +100,16 @@ The unified decision log (11 ADRs) — [docs/decisions/](decisions/). Splitting 
 - [ADR 0009 — Plain descriptive module names (a deliberate departure from Axon's codenames)](decisions/0009-plain-descriptive-module-names.md)
 - [ADR 0010 — `coord` as the single developer entry point](decisions/0010-coord-as-the-single-developer-entry-point.md)
 - [ADR 0011 — Settings migrations run on the persisted document, not the deserialized object](decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)
+- [ADR 0012 — A zone holds an ordered stack, realised as z-order](decisions/0012-zones-stacking-model.md)
+- [ADR 0013 — A sixth Conduit trigger kind: the pointer gesture, decided from pre-resolved regions](decisions/0013-the-pointer-gesture-trigger-kind.md)
+- [ADR 0014 — Atlas gains explicit raise and activate, and treats the foreground lock as a refusal](decisions/0014-atlas-explicit-raise-and-activate.md)
+- [ADR 0015 — Zones are addressed by (monitor, layout, cell), and monitors get a durable key](decisions/0015-zone-addressing-and-durable-monitor-identity.md)
+- [ADR 0016 — A stack member carries state, and reconciliation is generation-aware](decisions/0016-zone-occupancy-member-states.md)
+- [ADR 0017 — Every dispatch carries an invocation context, and a drag has exactly one lifecycle](decisions/0017-invocation-context-and-one-drag-lifecycle.md)
+- [ADR 0018 — Layout editing is three pure operations, and cell ids survive them](decisions/0018-layout-editing-grid-split-merge.md)
+- [ADR 0019 — A layout edit is one transaction over template, occupancy and placement](decisions/0019-layout-edits-are-a-transaction.md)
+- [ADR 0020 — An absent monitor makes a stack dormant, and a displacement degrades to a stack](decisions/0020-dormant-stacks-and-the-displacement-rules.md)
+- [ADR 0021 — A module states a standing request; Conduit computes the grants and keeps recomputing them](decisions/0021-requested-versus-granted-regions.md)
+- [ADR 0022 — Sampling, sequencing and swapping are one ordered operation](decisions/0022-one-publication-sequencer-for-desktop-facts.md)
+- [ADR 0023 — Conduit has two dispatch classes, and the control plane may not drop the final state](decisions/0023-the-control-plane-carries-state-not-deltas.md)
+- [ADR 0024 — `GrantVersion` is the only version, and it stamps everything](decisions/0024-grantversion-is-the-single-authoritative-version.md)

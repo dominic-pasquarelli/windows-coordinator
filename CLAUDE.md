@@ -417,18 +417,22 @@ actually care about, and it is unchanged since day one.
   sense that a cold reader can resume from it.
 - **The Python tooling is executed and verified.** `coord audit`, `coord map`, and `coord doctor`
   run in an environment with no .NET SDK, which is exactly the environment they were written in.
-- **No C# has been compiled — ever.** There is no `.sln`; solution files carry GUIDs that cannot be
-  generated meaningfully here, so generating it with `dotnet new sln` on a Windows machine is
-  literally the first task in NEXT.md. The platform contract interfaces are written and unverified.
-- **No module exists.** Zones (M1, FancyZones-like window snapping) and Chrono (M2, timers and
-  reminders) are planned, with a directory-level plan and no code. Further module ideas are parked
-  in [docs/vision.md](docs/vision.md) and are explicitly not scaffolded.
+- **The C# compiles and the Core suites pass** — CI at `7aef6ff`, Ubuntu and Windows, 0 warnings,
+  45 tests, 0 failed. **Nothing has been compiled locally** (TD-1), and there is still no `.sln`
+  (TD-2): solution files carry GUIDs that cannot be generated meaningfully here, so generating it
+  with `dotnet new sln` on a Windows machine is the first task in NEXT.md.
+- **No module code exists.** Zones (M1, window layouts with stacks) is **fully designed** —
+  [its architecture](src/modules/zones/docs/ARCHITECTURE.md) plus ADRs 0012–0024 — and deliberately
+  **not scaffolded**; not one line of it is written. Chrono (M2, timers and reminders) is a roadmap
+  entry only. Further module ideas are parked in [docs/vision.md](docs/vision.md).
 - **Nothing has run on Windows.** No hotkey registration, no window placement, no tray presence, no
   UI. Every Windows-facing statement in the docs is *design intent* backed by documented API
   behavior, not observation.
-- **The pillars are specified, not built.** [Conduit](docs/CONDUIT.md) and
-  [Atlas](docs/ATLAS.md) each have a full contract, a threading model, and a named set of dragons;
-  neither has an implementation.
+- **The pillars have contract types and no behaviour.** [Conduit](docs/CONDUIT.md) and
+  [Atlas](docs/ATLAS.md) each have a full contract, a threading model, and a named set of dragons.
+  Atlas's model and layout math compile and are covered by 25 tests; Conduit's declarations compile
+  and **the arbiter that gives them meaning is unwritten**. Neither has a Shell adapter, so neither
+  observes or touches the desktop.
 - **Known boundaries are explicit** and tracked in [docs/TECH_DEBT.md](docs/TECH_DEBT.md).
 
 The gate that ends P0 and the gate that ends P1 are both written down in
@@ -468,7 +472,7 @@ done when its gate is satisfied and the evidence is recorded.
 | [`src/pillars/atlas/README.md`](src/pillars/atlas/README.md) | Atlas's code home |
 | [`src/modules/README.md`](src/modules/README.md) | Where modules live — one self-contained directory each |
 | [`src/shell/README.md`](src/shell/README.md) | The WinUI host — settings and dashboard, Windows-only |
-| [`tests/README.md`](tests/README.md) | Where Core test projects will live (none yet) — and what a green run is allowed to mean |
+| [`tests/README.md`](tests/README.md) | The two Core test projects (Atlas, Platform) — and what a green run is allowed to mean |
 | [`tools/coord/README.md`](tools/coord/README.md) | The `coord` developer entry point |
 | [`tools/doc-audit/README.md`](tools/doc-audit/README.md) | The mechanical drift checker (`coord audit` wraps it) |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI pipeline definition |

@@ -487,8 +487,8 @@ related:
 
 ## Status
 
-Nothing here has been compiled or run. Replace this table as reality changes — a stale status table
-is the most invisible kind of drift there is (docs/AUDIT.md, Lens A).
+Nothing in this directory has been built or run. Replace this table as reality changes — a stale
+status table is the most invisible kind of drift there is (docs/AUDIT.md, Lens A).
 
 | | State |
 |---|---|
@@ -612,8 +612,9 @@ CORE_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
        The boundary check reads those as text and fails the gate.
        Shared properties (nullable, LangVersion, warnings-as-errors) come from Directory.Build.props.
        NOTE: this template's output is checked by tools/coord/tests/test_scaffold.py, which
-       scaffolds a module and asserts every ProjectReference it emits resolves. It has not been
-       compiled — no scaffolded module has ever been built. -->
+       scaffolds a module and asserts every ProjectReference it emits resolves. That check is
+       textual: the generated project has never been compiled, because no scaffolded module has
+       ever been built. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -637,8 +638,9 @@ SHELL_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
        Add the Windows App SDK package reference only when this module actually renders its own UI —
        the generic settings page comes free from declared capabilities.
        NOTE: this template's output is checked by tools/coord/tests/test_scaffold.py, which
-       scaffolds a module and asserts every ProjectReference it emits resolves. It has not been
-       compiled — no scaffolded module has ever been built. -->
+       scaffolds a module and asserts every ProjectReference it emits resolves. That check is
+       textual: the generated project has never been compiled, because no scaffolded module has
+       ever been built. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
@@ -686,8 +688,11 @@ def _cs_placeholder(cls: str, name: str, kind: str, body: str) -> str:
     return f"""// {cls}{kind} — SCAFFOLD PLACEHOLDER, intentionally empty of code.
 //
 // This file exists so the module's shape is right from the first commit; it deliberately contains
-// no implementation, because a generated stub that references types nobody has compiled is worse
-// than an honest blank. Nothing in this repository has ever been through a C# compiler.
+// no implementation, because a generated stub is a guess at an interface you have not read yet.
+//
+// The platform contract this module implements compiles and its Core logic is tested (CI, 7aef6ff)
+// — but no module has ever been scaffolded, built, or run, and nothing in this repository has run
+// on Windows. Delete this banner when that stops being true.
 //
 {wrapped}
 //
@@ -696,6 +701,31 @@ def _cs_placeholder(cls: str, name: str, kind: str, body: str) -> str:
 
 namespace Coordinator.{cls};
 """
+
+
+# Files a design-first module is allowed to already contain. Everything else blocks the scaffold —
+# see the note in cmd_new_module. Kept as an explicit allow-list because the failure mode of a
+# deny-list is that a file type nobody thought of is silently treated as documentation.
+DOC_ONLY_EXACT = {"README.md", ".gitkeep", ".gitignore"}
+DOC_ONLY_DOCS_SUFFIXES = {".md", ".png", ".svg"}
+IGNORED_DIRS = {"bin", "obj", ".vs", "__pycache__"}
+
+
+def _non_documentation_files(root: Path) -> list[Path]:
+    """Existing files under `root` that are not part of the documentation-only shape."""
+    if not root.exists():
+        return []
+    out: list[Path] = []
+    for f in sorted(root.rglob("*")):
+        if f.is_dir() or any(part in IGNORED_DIRS for part in f.parts):
+            continue
+        r = f.relative_to(root)
+        ok = (r.as_posix() in DOC_ONLY_EXACT
+              or f.name in DOC_ONLY_EXACT
+              or (r.parts[:1] == ("docs",) and f.suffix.lower() in DOC_ONLY_DOCS_SUFFIXES))
+        if not ok:
+            out.append(f)
+    return out
 
 
 def cmd_new_module(args) -> int:
@@ -722,12 +752,29 @@ def cmd_new_module(args) -> int:
     docs_dir = mod_dir / "docs"
     test_dir = TESTS_DIR / f"Coordinator.{cls}.Core.Tests"
 
-    if mod_dir.exists():
-        die(f"{rel(mod_dir)} already exists — refusing to overwrite an existing module.\n"
-            "         If you meant to start over, move or delete it yourself; a scaffold that can\n"
-            "         silently clobber work is a scaffold nobody can trust.")
-    if test_dir.exists():
-        die(f"{rel(test_dir)} already exists — refusing to overwrite it.")
+    # A module in this project starts as a DESIGN before it starts as code — docs/MODULE_SPEC.md
+    # says to write the spec first, and Zones was specified in full while the module host that would
+    # load it did not exist. So a directory holding only documentation is not "an existing module"
+    # to be protected from; it is the normal state of a module the day before its first line of C#.
+    #
+    # But "documentation only" must be an ALLOW-LIST, not "contains no .csproj". The first version
+    # of this guard tested for the absence of a project file, which quietly accepted a directory
+    # holding orphan .cs, .xaml, .resx or a half-written anything — and then printed "holds
+    # documentation only" while scaffolding around real work. A guard whose predicate is broader
+    # than its claim is the same defect as a check that cannot fail: it passes for reasons its own
+    # message does not admit. Reported in review of PR #2.
+    blockers = _non_documentation_files(mod_dir) + _non_documentation_files(test_dir)
+    if blockers:
+        listed = "\n".join(f"           {rel(b)}" for b in blockers[:8])
+        more = f"\n           … and {len(blockers) - 8} more" if len(blockers) > 8 else ""
+        die(f"refusing to scaffold: {len(blockers)} existing file(s) are not documentation.\n"
+            f"{listed}{more}\n"
+            "         A docs-only module (README.md, docs/*.md) is filled in around; anything\n"
+            "         else is work this tool must not touch. Move or delete it yourself — a\n"
+            "         scaffold that can silently clobber work is a scaffold nobody can trust.")
+    if mod_dir.exists() or test_dir.exists():
+        info(f"{rel(mod_dir)} exists and holds documentation only — adding the code projects "
+             "around it, leaving every existing file untouched.")
 
     files: dict[Path, str] = {
         mod_dir / "README.md": _module_readme(name, cls, today),
@@ -751,23 +798,36 @@ def cmd_new_module(args) -> int:
             "the module must remain useful when refused."),
         core_dir / f"{cls}Settings.cs": _cs_placeholder(
             cls, name, "Settings",
-            "The versioned settings record. Every field has a default so old settings still load "
-            "(additive by default); structural changes get an explicit Migrate() plus a test that "
-            "fails without it. A reset is only ever explicit."),
+            "The versioned settings record carrying SchemaVersion. Every field has a default so old "
+            "settings still load (additive by default). A STRUCTURAL change ships an "
+            "ISettingsMigration that rewrites the persisted JSON before it is deserialized "
+            "(ADR 0011), plus a test observed failing without it. A reset is only ever explicit."),
         shell_dir / f"Coordinator.{cls}.Shell.csproj": SHELL_CSPROJ.replace("{cls}", cls),
         test_dir / f"Coordinator.{cls}.Core.Tests.csproj":
             TESTS_CSPROJ.replace("{cls}", cls).replace("{name}", name),
     }
 
+    # Never overwrite a file that is already there. The guard above establishes that no CODE exists;
+    # this establishes that a hand-written README or ARCHITECTURE.md survives contact with the
+    # scaffolder. A generator that silently replaces prose someone wrote is worse than one that
+    # refuses outright, because the loss is invisible until you look for it.
+    skipped = [p for p in files if p.exists()]
+    to_write = {p: c for p, c in files.items() if not p.exists()}
+
     if args.dry_run:
-        print(f"(dry-run) would create {len(files)} file(s) under {rel(mod_dir)} and {rel(test_dir)}:")
-        for path in files:
+        print(f"(dry-run) would create {len(to_write)} file(s) under {rel(mod_dir)} and {rel(test_dir)}:")
+        for path in to_write:
             print(f"          {rel(path)}")
+        for path in skipped:
+            print(f"          (kept, already exists) {rel(path)}")
         return EXIT_OK
 
-    for path, content in files.items():
+    for path, content in to_write.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+    for path in skipped:
+        info(f"kept existing {rel(path)}")
 
     print()
     ok(f"scaffolded module '{name}' ({cls})")
@@ -806,8 +866,8 @@ docs/MODULE_SPEC.md:
 
 Then run:  coord test  ·  coord audit  ·  coord map --check
 """)
-    warn("the .csproj files just written have never been restored or built — no C# in this "
-         "repository has been through a compiler.")
+    warn("the .csproj files just written have never been restored or built — this template's "
+         "output has never been through a compiler. Run `coord build` before trusting it.")
     return EXIT_OK
 
 

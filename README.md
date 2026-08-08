@@ -114,7 +114,7 @@ Full model: [docs/COORDINATOR.md](docs/COORDINATOR.md).
 
 | Module | What it will do | Status |
 |---|---|---|
-| **Zones** (M1) | FancyZones-like window management: layout templates, per-monitor zone sets, drag-to-snap. The first real consumer of both pillars; its zone-rectangle math is pure, so it is host-testable. | 📋 **Planned — not implemented, not scaffolded** |
+| **Zones** (M1) | Window layouts **with stacks** — a zone holds several windows and `Win`+wheel cycles them, which is the part FancyZones does not do. The first real consumer of both pillars; its zone-rectangle math is pure, so it is host-testable. | 📐 **Fully designed, no code** — [architecture](src/modules/zones/docs/ARCHITECTURE.md) + ADRs 0012–0024; deliberately not scaffolded |
 | **Chrono** (M2) | Timers, pomodoro, reminders. The first consumer of scheduled triggers and notifications. | 📋 **Planned — not implemented, not scaffolded** |
 | Launcher, Clipboard, PinTop, Palette, Focus, Restore | Ideas only — parked deliberately, with no code and no directory. | 💭 [docs/vision.md](docs/vision.md) |
 
@@ -162,10 +162,10 @@ src/
   platform/          the platform core — host, registry, identity, settings, update channel
   pillars/conduit/   Conduit — input & trigger fabric
   pillars/atlas/     Atlas — desktop spatial truth
-  modules/           one self-contained directory per module (empty by design today)
+  modules/           one per module — `zones/` is documentation only, deliberately unscaffolded
   shell/             the WinUI settings + dashboard host (Windows-only)
 
-tests/               where Core test projects will live — none exists yet
+tests/               two Core test projects (Atlas, Platform) — net9.0, run anywhere
 tools/
   coord/             the `coord` CLI (stdlib-only Python)
   doc-audit/         the code↔docs drift checker (`coord audit` wraps it)

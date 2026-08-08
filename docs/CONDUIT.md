@@ -120,7 +120,7 @@ only way to keep the blast radius bounded.
 
 ## 3. The trigger-intent taxonomy
 
-Five kinds. Each row below is a *contract*: what the intent carries when a module declares it, and
+Six kinds. Each row below is a *contract*: what the intent carries when a module declares it, and
 what Conduit guarantees when it fires. The guarantees are deliberately modest — an honest weak
 guarantee a module can rely on beats a strong one that quietly does not hold.
 
@@ -131,6 +131,7 @@ guarantee a module can rely on beats a strong one that quietly does not hold.
 | **Schedule** | capability id · a fixed interval, a wall-clock time, or a one-shot instant · a drift policy · a missed-fire policy | fires on a dispatch worker, never a hook thread; **not** real-time — no latency bound; behavior across machine sleep and across a civil-time discontinuity is defined, not incidental |
 | **Tray / menu action** | capability id · a label · optional enabled/checked state | invoked on the UI thread; always attributed to the declaring module by name; lives in the **one** host-owned tray menu |
 | **Input gesture** | capability id · a recognizer spec (e.g. *window drag in progress* + *modifier held*) | delivered as a **recognized gesture**, never raw input; updates are throttled and coalesced; **`Ended` is always delivered if `Started` was** — including on cancel |
+| **Pointer gesture** | capability id · a modifier requirement · a wheel axis · an **armed region set** the module pre-resolves and republishes | a **discrete** event carrying the capability id, cursor position and tick delta; coalesced under load; **explicitly not** one dispatch per physical detent, not ordered against other input kinds, and not guaranteed at all when saturated |
 
 The rest of this section says what each one is actually for and where its sharp edges are.
 
@@ -155,7 +156,8 @@ expensive has happened, and it cannot be starved by a slow handler because no ha
 input path to begin with. A low-level hook can express things a registration cannot (a modifier held
 during a drag), but it puts our code on every keystroke the machine processes. So: **registrations
 for plain chords; a hook only where the intent genuinely cannot be expressed as one**, which today
-means gestures (§3.5) and nothing else. Revisit when a real intent arrives that needs more.
+means the two pointer-driven kinds — gestures (§3.5) and pointer gestures (§3.6) — and nothing else.
+Revisit when a real intent arrives that needs more.
 
 ### 3.2 Window event
 
@@ -232,6 +234,270 @@ drag ending outside any target, focus loss, session lock, or the recognizer bein
 `Cancelled` end rather than leaving the module hanging. This is the same reasoning as §3.2's paired
 move/size events, and it is worth restating because it is the guarantee a gesture consumer will
 build its cleanup on.
+
+### 3.6 Pointer gesture
+
+The motivating case is Zones' stack cycling: *the wheel moved, with a modifier held, over one of
+these rectangles.* It is not §3.5 — that kind is a **span** whose guarantees exist so an overlay put
+up at `Started` is always taken down, and a wheel tick is **discrete**, with nothing to clean up.
+Forcing it into a span would mean synthesising lifecycle events with no referent. Full reasoning and
+the §7 checklist: [ADR 0013](decisions/0013-the-pointer-gesture-trigger-kind.md).
+
+**The rule that makes this kind safe, and the reason it is written here rather than in a module:**
+
+> **A pointer-gesture recognizer must be answerable from data Conduit already holds.** The decision
+> to swallow or pass through happens on the hook thread, on every wheel event the machine
+> processes — including the one scrolling this page. Asking a module would put arbitrary code on the
+> critical path of every scroll on the desktop, which is the failure this pillar exists to prevent.
+
+So a module supplies **pre-resolved rectangles** in
+[`PhysicalVirtualScreen`](ATLAS.md#51-the-spaces) space and republishes them when they change. The
+hook does an early-out on the modifier, then a bounded rectangle test, then swallow-or-pass. The
+dispatch runs on a worker; the hook's whole job is *test, decide, queue*.
+
+**Conflicts are geometric, not modifier-wide.** Two intents collide only when their modifier matches
+**and** their regions intersect — two modules requesting disjoint regions with the same modifier is
+the normal case, not a conflict. A collision is **arbitrated by priority, not refused** (§3.6.1);
+the refusals are `ModifierReserved` and `TooManyRegions`, which are malformed and over-quota requests
+rather than contention.
+
+**Fail open, always.** Empty region set, unknown modifier state, saturated queue — pass the event
+through untouched. A dropped cycle tick is cosmetic; a swallowed scroll is a desktop that feels
+broken, and the user cannot tell which component did it.
+
+**Staleness is bounded by the topology generation.** An armed region set carries the Atlas generation
+it was computed at, so Conduit can drop a provably-stale set rather than acting on rectangles that
+no longer describe any monitor.
+
+**Publication is an atomic swap of an immutable set, and this is a hard requirement rather than an
+implementation note.** A module computes a region set on a worker thread; the hook thread reads it on
+every wheel event. Those are different threads, and the naive shape — a mutable collection the module
+edits in place while the hook walks it — is a data race on the input path of the whole desktop, which
+is the worst place in this system to have one.
+
+So the contract is:
+
+- A region set is **immutable once published.** A module that wants different regions builds a new
+  set and publishes that; it never edits a published one.
+- Publication **replaces the current set in a single atomic reference swap.** The hook thread reads
+  the reference once per event and works with whatever set it got — a set that was current a
+  microsecond ago is a perfectly good answer, and a torn read is not.
+- **Conduit owns the published set's lifetime**, not the module. A module that unregisters, or is
+  unloaded mid-drain, must not be able to free memory the hook is reading. The last set stays alive
+  until Conduit is certain no reader holds it.
+- **Unregistration is not immediate disarmament.** It stops future dispatches; a swallow decision
+  already in flight completes. A module must therefore tolerate one dispatch arriving after it asked
+  to stop, which is cheaper for everyone than making the hook thread synchronise with a module's
+  shutdown.
+
+*(Recorded because the shape is a known trap rather than a hypothetical: a borrowed pointer read
+concurrently by another task, with no ownership rule, no lifetime guarantee, and no protection
+against the owner detaching mid-read. The first draft of this kind specified staleness and forgot
+the swap entirely.)*
+
+**Updating a live region set is its own operation, and it can be refused.** A module republishes
+constantly — every layout change, every stack that crosses depth two. So:
+
+| Question | Answer |
+|---|---|
+| A publication overlaps **any** other owner | **Accepted.** Contention is arbitrated, not refused. The request is recorded whole; the **grant** is whatever arbitration awards, and the result reports it explicitly |
+| Is a grant ever partial | **Yes** — and it is always *reported*. What is forbidden is silent trimming, not partial granting: a module must never have to infer what it holds |
+| What can still refuse a whole publication | `ModifierReserved` and `TooManyRegions` — malformed or over-quota requests, which are errors rather than contention |
+| Who wins a contested rectangle | **Explicit user priority, then stable module id** — see below. Never "whoever got there first" |
+| How an owner loses a region | By reducing its own request, by unregistering, **or by arbitration awarding it to a higher-priority requester** |
+| How an owner **regains** one | **Automatically**, when the higher-priority requester withdraws, unregisters or loses priority. The module does not re-publish and must not — see §3.6.1 |
+| Can **withdrawing** be refused | **Never.** Publishing a set that adds nothing you did not already request, or the empty set, always succeeds |
+| Where the topology generation comes from | **Atlas**, carried on the set by the publishing module, which got it from the snapshot it computed against. Conduit compares it with the generation it last observed from Atlas |
+
+#### Stable priority — why "earlier registration wins" is not good enough
+
+Registration order is a property of **how the host happened to load modules this run**: it changes
+when a module is disabled, when one fails to load and is retried, when the registry is reordered, or
+when loading is parallelised later. An arbitration rule built on it produces a different winner on
+different runs of the same configuration, and the loser has no way to find out why. That is the same
+class of defect as an unstable sort — invisible until it matters, then impossible to reason about.
+
+The order is:
+
+1. **Explicit user priority.** A per-module integer in platform settings, default 0, higher wins.
+   This is the only knob, it is visible in the Shell, and it exists so an overlap the user cares about
+   has an answer the *user* chose.
+2. **Stable module identity.** Ties break on the module's permanent string id, ordinal comparison.
+   Arbitrary, and *deterministic across runs, machines and load orders*, which is the property that
+   matters. Nothing here depends on when anything registered.
+
+#### A region grant is a revocable lease, because the alternative smuggles registration order back in
+
+**Stable priority and "the incumbent always keeps it" cannot both hold.** If a lower-priority module
+keeps a contested rectangle merely because it published first, then the winner is still decided by who
+arrived first — the priority order is decoration, and the arbitration rule is the very thing it
+claimed to replace, one level down. *An earlier draft of this section asserted both, and this
+paragraph is the retraction.*
+
+So a grant is a **lease**, in the sense the [Core/Shell table](#6-the-coreshell-split-applied-here)
+already gives Conduit, and preemption is real.
+
+### 3.6.1 Requested and granted are two different values
+
+A lease that is only ever *taken* has the same defect one level further on, and it took a second
+review to see it. If Conduit forgets what a preempted module asked for, then when the winner later
+withdraws nothing brings the region back — and the final armed map depends on the sequence of events
+rather than on the current state. So Conduit keeps **two values per owner**
+([ADR 0021](decisions/0021-requested-versus-granted-regions.md)):
+
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record RegionOwner(
+    ModuleId Module,
+    int Priority,                 // explicit user setting; ties break on ModuleId
+    ArmedRegionSet Requested,     // the module's standing desire — changes only when it publishes
+    ArmedRegionSet Granted,       // Conduit's current answer — changes when anything changes
+    int GrantVersion);            // bumped on EVERY change to Granted
+```
+
+**Grants are recomputed in full, never patched:**
+
+```
+grants = arbitrate(every owner's Requested, priority order)
+```
+
+— re-run whenever a module publishes, a module registers or unregisters, or **a priority setting
+changes**. No previous grant map is an input, and arrival order appears nowhere in the computation.
+
+**Recomputation is serialized**, for the same reason publication is
+([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)): two overlapping
+recomputations could each read the request set, arbitrate, and swap, with the loser's older result
+landing last. Since a recomputation reads all requests at execution time, concurrent triggers coalesce
+into one run — the same property, for the same reason. It happens on registration, settings-save and
+unregistration, never on the input path.
+
+**Every change to `Granted` bumps `GrantVersion` and emits one control-plane message:**
+
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record GrantChanged(ArmedRegionSet Granted, int GrantVersion);
+```
+
+**Absolute state, not a delta** ([ADR 0023](decisions/0023-the-control-plane-carries-state-not-deltas.md)).
+The obvious design is a `RegionsRevoked` / `RegionsRestored` pair, and it is wrong here: deltas are
+correct only if *every* message is delivered in order, and §5.3's event-plane queue promises neither.
+A dropped restore leaves a module showing a zone as unavailable **forever** — nothing retries, because
+a module must not re-request — and a revoke arriving after a restore produces the same wrong end state.
+One absolute message removes both failures: the consumer **adopts the set**, which is idempotent and
+order-insensitive.
+
+Delivery is the **control plane**: serial per owner, latest-state coalescing, **the final state is
+never dropped**. Under pressure a pending update is *replaced* by the newer one, so the per-owner
+depth is effectively one and the survivor is always the most complete.
+
+- **A version gap is normal, not an error.** A module may see `GrantVersion` go 5 → 9 because 6–8 were
+  superseded. Stated plainly because the alternative is an implementer writing a gap-detected-resync
+  loop that fires hardest under exactly the load it was meant to help.
+- **A module ignores a version it has already passed** (`≤` the last applied). Cheap, local, and it
+  makes the module correct independently of a delivery guarantee it cannot verify.
+- **There is a current-grant read** — `QueryGrant(module) -> (Granted, GrantVersion)` — for
+  **recovery**: a handler that faulted, or a module re-initialising, resynchronizes in one call rather
+  than waiting for an arbitration change that may never come. Not for routine gap-filling.
+
+#### One path in, and the publication result uses it
+
+```csharp
+// SKETCH — illustrative, not compiled.
+(ArmedRegionSet Granted, int GrantVersion) Publish(ArmedRegionSet requested);
+
+void ApplyGrant(ArmedRegionSet granted, int version);   // the ONLY way grant state changes
+```
+
+**`Publish` returns a versioned grant, and that result goes through the same `ApplyGrant` as every
+`GrantChanged`** ([ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md)). There
+is deliberately no separate publication-result path.
+
+*This is not symmetry for its own sake.* An unversioned result is a second writer to the same state
+with no guard, so an in-flight result for grant v1 can land **after** a `GrantChanged` for v2 and
+overwrite it — leaving the module acting on a grant that has already been superseded, with nothing to
+detect it. Two paths mutating one state where only one is guarded is the bug; one guarded path is the
+fix, and it is smaller than guarding the second path carefully.
+
+**The version bump on *restoration* is as load-bearing as the one on revocation:** a gesture recognized
+under the old lease and still queued must not execute against an arbitration state that has since
+changed, and "changed back" is still changed.
+
+**A module never re-publishes to regain a region**, and must not try. Its request never went away;
+restoration is Conduit's job. A module that re-requests on revocation is fighting the user's own
+priority setting, and it cannot win.
+
+**Now the property is actually true:** `grants = f(requests, priorities)`, with history nowhere in it.
+Publish order changes which notifications fire, never which module ends up holding what — including
+across a full preempt-then-withdraw cycle, which is the case the previous design got wrong.
+[§5.4](#54-proving-the-guard-not-asserting-it) requires the permutation test to include exactly that
+cycle.
+
+The cost is honest, and it is two things. Conduit now stores rectangles a module is **not** currently
+granted, bounded by the same per-module cap that bounds the hook test. And a module must **adopt a
+grant set** rather than react to a change — which is less work than handling two delta events, and is
+the shape that survives a message being coalesced away. Zones' side is
+[ARCHITECTURE §7.4](../src/modules/zones/docs/ARCHITECTURE.md#74-losing-and-regaining-a-region).
+
+#### Withdrawal always succeeds
+
+Arming is a request that arbitration answers. **Disarming is not a request at all** — a module may
+always publish a set that adds no rectangle it did not already request, and the empty set is always
+accepted. Without this rule a module can get stuck holding regions it has decided are wrong, with no
+safe state to fall back to.
+
+It is also what keeps §3.6.1's recomputation total: shrinking a request can never fail, so a module
+withdrawing is always able to complete, and the grant map that follows is always computable.
+
+**With contention arbitrated rather than refused, publishing is one step.** A module publishes what it
+wants and is told what it was granted; if part is withheld, the result says which rectangles and the
+module reports that surface as unavailable. There is no retry loop to bound and no question of how
+many attempts to make — *an earlier draft specified a two-step subtraction retry, which existed only
+to work around contention being a refusal.* The consumer's side is
+[Zones ARCHITECTURE §7.3](../src/modules/zones/docs/ARCHITECTURE.md#73-applying-an-edit).
+
+#### The queued event carries a token, not coordinates
+
+A dispatch carries the **opaque zone token** that matched and the **`GrantVersion`** it matched under.
+On delivery the module executes only when that version **exactly equals** the grant version it has
+applied, and drops the event otherwise. Without this, a change between recognition and dispatch cycles
+*a different zone than the one the user pointed at*, which is both wrong and untraceable.
+
+**The version is `GrantVersion` and nothing else** ([ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md)).
+*An earlier draft stamped the module's **requested**-set version, which was the same value back when a
+module's published set was the set the hook tested. Once §3.6.1 split requested from granted, they
+stopped being interchangeable — a requested-set version sits unchanged while `GrantVersion` moves
+through lease epochs, because arbitration changes without the module publishing anything.* That let a
+tick recognized at grant v1 survive a preempt (v2) and a restore (v3) and still pass its guard, because
+the guard was checking the one value that had not changed.
+
+**Exact equality, not `>=`.** An *older* version means the event was recognized under a lease epoch
+that has been replaced. A *newer* one means Conduit has swapped the hook table but the module has not
+yet applied that grant — so acting would mean acting on a state the module has not adopted. Both drop.
+This can lose a tick in the narrow window around an arbitration change, which is consistent with what
+this kind guarantees: delivery was never promised, and a dropped cycle tick is cosmetic where a tick
+executed against the wrong epoch is not.
+
+The **zone token stays**, because it answers *which zone* and `GrantVersion` does not. The two answer
+different questions.
+
+**The cursor position is still present — as context, never as an address.** §5.5's
+`InvocationContext` carries the cursor captured at recognition (a `Hook` origin reads it from the
+event structure, which already holds it). The distinction is what each is *for*: the token answers
+**which zone**, and it is the only thing permitted to; the cursor answers *where the pointer was*, for
+a module that wants to position an overlay or log a diagnostic. A module that re-derives a zone by
+hit-testing the cursor has reintroduced exactly the staleness the token exists to eliminate.
+
+*(This reconciles the guarantee statement in
+[ADR 0013](decisions/0013-the-pointer-gesture-trigger-kind.md), which as first written listed the
+cursor position as the payload.)*
+
+**Coalescing key: `(intent, zone token)`.** Ticks for the same zone coalesce and their deltas sum;
+ticks for different zones never coalesce with each other.
+
+**The swallow happens only after the bounded queue has accepted the event.** The order is: test →
+**try-enqueue** → if enqueued, swallow; if not, pass through. This is what makes fail-open real
+rather than aspirational — a saturated queue produces a scroll that works, not a scroll that
+vanishes.
 
 ---
 
@@ -330,7 +596,7 @@ other side, and it extends past the hook to the module handler.
 
 | Stage | Thread | Bounded? | On overload |
 |---|---|---|---|
-| Recognize | the hook / OS callback | yes — table lookup + enqueue | drop, and count the drop |
+| Recognize | the hook / OS callback | yes — table lookup + **context capture** (§5.5) + enqueue | drop, and count the drop |
 | Queue | — | yes — fixed capacity, per-intent coalescing | drop the *oldest coalescible* item; never grow, never block the producer |
 | Dispatch | a dispatch worker (UI thread only for tray/menu items) | no | the module's own problem, by design |
 | Handle | the module's handler | no | overruns counted, surfaced, and eventually fault the module |
@@ -349,6 +615,31 @@ forbid it in the fabric than to document it in every module.
 module; sustained overruns disable the module rather than let it degrade the input path, which is
 the "Dispatch" row of [COORDINATOR.md §6](COORDINATOR.md).
 
+#### Two dispatch classes, with opposite guarantees
+
+Everything above describes the **event plane**, and its drop policy is right for it: a wheel tick
+that never arrives is a cosmetic loss, and buffering on the hook path would be worse than the loss.
+
+That reasoning does **not** transfer to a message that says *what the world currently is*. Conduit
+carries those too — the grant updates in §3.6.1 — and a dropped one desynchronizes a module
+permanently, because there is nothing to retry and no later event that repairs it
+([ADR 0023](decisions/0023-the-control-plane-carries-state-not-deltas.md)):
+
+| | **Event plane** | **Control plane** |
+|---|---|---|
+| Carries | something happened — a tick, a chord, a gesture | what the world **is** — the current grant |
+| Under overload | **drop the oldest coalescible**, and count the drop | **never drop the final state**; replace pending with the newer |
+| Ordering | none across kinds | **serial per owner** |
+| Payload | a delta — this happened | **absolute state** — this is how things are |
+| A lost message costs | a cosmetic miss | **permanent desynchronization** |
+
+**The payload row is what makes the guarantee affordable.** A delta is correct only if every message
+arrives in order; an absolute snapshot is correct if **the last one** arrives — which is a promise a
+bounded queue can keep, and it makes a coalesced-away intermediate harmless instead of corrupting.
+
+*This distinction was implicit and wrong: these messages were specified as "ordinary dispatches" and
+were therefore droppable by a policy whose correctness argument never covered them.*
+
 ### 5.4 Proving the guard, not asserting it
 
 [OPERATING_MODEL §7](OPERATING_MODEL.md)'s operational rule — *when you add a guard, prove it fails
@@ -362,9 +653,309 @@ advance so it does not get negotiated later:
 - The queue's drop-and-count path gets a test that fills the queue and asserts the drop count,
   because a queue that silently grows under load looks identical to a healthy one right up until the
   machine is out of memory.
+- **The publisher-liveness check (§5.5) gets tests in both directions, and the second one is the
+  point.** A fake clock advances well past the heartbeat interval *with the publisher heartbeating*
+  and the context must **not** be `ContextStale` — that is the assertion the rejected age-threshold
+  design would fail, and without it nothing distinguishes a liveness check from the age check it
+  replaced. Then the publisher stops and the same elapsed time must produce `ContextStale`.
+- **The heartbeat's repair path gets a test that suppresses an event**, because a self-healing
+  mechanism that is never observed healing is indistinguishable from one that does not work. Drive a
+  fake desktop source: change the foreground **with its change notification suppressed**, assert the
+  published record is now wrong, advance exactly one heartbeat, and assert the published foreground
+  **matches reality** and the missed-notification counter moved. Run the same test against a build
+  whose heartbeat republishes the previous record unchanged — the shape the first draft specified —
+  and it must go red.
+- **Arbitration determinism (§3.6) is tested by permutation, not by example**, and the permutation
+  must include a **full lease cycle**: low priority requests a region · high priority preempts it ·
+  high priority withdraws · low priority **regains it automatically**. Then the same operations in
+  every other order, all ending in the identical armed map. A permutation test without the withdraw
+  step passes under the design [ADR 0021](decisions/0021-requested-versus-granted-regions.md)
+  replaced, because that design's defect only appears once a winner leaves.
+- **Publication ordering (§5.5) gets a deterministic race, driven by an injected schedule rather than
+  by timing.** Hold the sequencer after a heartbeat request is enqueued, deliver a foreground change
+  that publishes at sequence *n*, release the sequencer, and assert three things: the final record is
+  the **new** foreground, `Sequence` never carries an older observation than a lower one, and the
+  repair counter **did not** increment — the event reported the change, so nothing was repaired. Run
+  it against a build where each path samples then swaps independently and it must go red on the first
+  assertion. Racing by real threads and hoping is not a test; the schedule is what makes the failure
+  reproducible.
+- **Control-plane delivery (§3.6.1) gets a saturation test**, because the guarantee is specifically
+  about behaviour *under overload* and is vacuous when nothing is under pressure. Fill the event queue
+  so it is dropping, then drive **revoke → restore**, and assert the module eventually observes the
+  **restored** grant and never afterwards applies the revoked one. Then assert the same holds when the
+  two updates coalesce — the survivor must be the newer, complete state. A version-ignoring consumer
+  must fail this test.
+- **The `GrantVersion` guard (§3.6, §3.6.1) gets the two sequences it exists for**, both of which pass
+  under the design [ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md)
+  replaced:
+  1. **Stale epoch.** Recognize a pointer event at grant **v1** · preempt to **v2** · restore to
+     **v3** · then deliver the v1 event. It must be **dropped**. Run it against a build that guards on
+     the module's requested-set version and it must go red — that version never changed, so the event
+     executes.
+  2. **Out-of-order publication result.** Hold a `Publish` result for **v1**, apply `GrantChanged`
+     **v2**, then deliver the v1 result. It must **not** overwrite v2. Run it against a build with a
+     separate unguarded publication-result path and it must go red.
 - **Latency itself cannot be tested this way**, and pretending otherwise would be the exact failure
   §7 names. Actual hook latency is a [manual-validation](runbooks/manual-validation.md) row, measured
   on a real desktop, recorded with a date and a machine. No Core test result may ever be described as evidence about it.
+
+---
+
+### 5.5 What every dispatch carries — the invocation context
+
+A dispatch says *that* something happened. A module almost always also needs *the state of the world
+when it happened*: which window had focus when the chord fired, where the cursor was, which monitor
+that was over. Without it, a capability like "snap the focused window" or "cycle the zone under the
+cursor" cannot be implemented at all without a module reaching for Windows itself — which
+[principle 4](COORDINATOR.md#7-non-negotiable-principles) forbids, and building a focus cache from
+§3.2's coalesced hints is worse.
+
+So **every payload carries an `InvocationContext`**.
+
+#### The timing rule
+
+> **The context is captured at recognition — the moment the event is recognized and enqueued — never
+> reconstructed at dispatch.**
+
+This is the whole point of the type, and it is worth being blunt about why the obvious alternative
+fails. §5.3's hand-off puts **Recognize** on the hook or OS callback and **Dispatch** on a worker,
+with a queue in between. A context sampled on the worker describes the world after an unbounded queue
+delay, on the far side of exactly the interval during which the user moved the mouse and switched
+windows. "Sample it at dispatch" and "give the module the state when it happened" are not compatible
+statements; the first draft of this section asserted both.
+
+**Captured, derived, reconstructed — the distinction that makes this workable:**
+
+| | Meaning | Allowed |
+|---|---|---|
+| **Captured** | Read at recognition, on the recognizing thread, into the payload | Yes — this is the mechanism |
+| **Derived** | A pure function of already-captured facts, computed later | Yes. Same answer whenever it runs, so *when* is irrelevant |
+| **Reconstructed** | A **live** source read on the worker, presented as event-time truth | **No.** This is the failure the rule exists to prevent |
+
+`MonitorUnderCursor` is *derived*: a rectangle test of a captured cursor point against the monitor
+list at a captured generation. Computing it on the worker keeps a loop off the hook thread and
+changes no answer. Reading `GetForegroundWindow()` on the worker would be *reconstruction*, and is
+forbidden however convenient the value looks.
+
+#### What each source may capture
+
+Recognition happens on different threads with different budgets, so what is capturable differs by
+source. The context names its own origin so a module can tell which guarantees it has:
+
+| Origin | Recognized on | Captures | Notes |
+|---|---|---|---|
+| **Hook** — pointer gesture (§3.6), input gesture (§3.5) | the low-level hook thread, under §5.1's budget | cursor and timestamp **from the event structure itself**; everything else from the **atomically-published desktop facts** — one reference read | **May not call Atlas, or anything else.** §5.2's forbidden list is not relaxed for context capture |
+| **OS callback** — **hotkey chord (§3.1)**, window event (§3.2) | a message-loop or callback thread, with no microsecond budget | a live Atlas point sample at recognition | The origin where "sample now" is both allowed and accurate |
+| **UI** — tray action, menu item | the UI thread | a live point sample, plus the invoking menu item | Cursor is where the user clicked the menu, which is what they mean |
+| **Timer** — schedule | a timer thread | **no cursor and no foreground at all** | A 25-minute tick has no event-time cursor. The fields are null and `Origin` says why — not a fabricated "wherever the mouse happens to be" |
+
+**`Hook` is exactly the two pointer-driven kinds, and that is not an arbitrary grouping — it is what
+makes the row above true.** §3.1's mechanism decision means plain chords are **kernel registrations,
+not hooks**: they arrive as `WM_HOTKEY` on a message loop, where a live point sample is both permitted
+and correct. The two pointer kinds are the only hook-recognized intents Conduit has, they are both
+**mouse**-driven, and a mouse hook's event structure carries the cursor. So "the cursor comes from the
+event structure" holds for every `Hook` context by construction rather than by luck.
+
+> **The trip-wire, recorded because §3.1 invites the revisit.** If a future intent ever needs a
+> low-level **keyboard** hook, it does **not** join this row. A keyboard hook's event structure has no
+> cursor coordinates, and the hook thread may not sample one — so such an intent would capture a
+> **null** cursor, and Conduit must refuse to bind a cursor-dependent capability to it **at
+> registration time**, not fail at dispatch. Adding a keyboard-hook kind without answering that is
+> adding a capability that silently does nothing.
+>
+> *An earlier draft of this section listed the chord under `Hook` and claimed its cursor came from the
+> event structure. Neither `WM_HOTKEY` nor `KBDLLHOOKSTRUCT` carries one — the row was describing a
+> mouse hook and labelling it "keyboard or mouse".*
+
+#### The published desktop facts
+
+Hook-thread capture reads one immutable record, republished by [Atlas](ATLAS.md) whenever the
+foreground window or the topology changes:
+
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record DesktopFacts(
+    WindowRef? ForegroundWindow,
+    IReadOnlyList<MonitorGeometry> Monitors,
+    int TopologyGeneration,
+    long Sequence,              // monotonic; bumped by every publication, change or heartbeat
+    long HeartbeatAtTicks);     // when the publisher last proved it was alive
+```
+
+**Publication follows §3.6's contract exactly** — immutable value, atomic reference swap, Conduit owns
+the lifetime, the reader never blocks. It is deliberately the same mechanism as the armed region set
+rather than a second one: there is one way in this pillar to hand data to the hook thread.
+
+#### Age is not staleness — the publisher's liveness is
+
+These are **event-driven** facts. Atlas republishes when the foreground window or the topology
+changes, so on a desktop nobody is touching, a record can be an hour old and **completely correct**.
+A threshold on content age is therefore wrong in both directions, and each direction is its own bug:
+
+- **False positives that get worse the longer things are fine.** An hour of no window switching would
+  make every hook gesture refuse `ContextStale` — the feature breaking *because* the desktop was
+  stable, which is the failure mode hardest to reproduce and easiest to disbelieve.
+- **False negatives.** A record published 5 ms ago is *recent* and still wrong if the publication
+  after it was missed. Recency was never evidence of correctness; it was a proxy for it.
+
+So the staleness test is a **liveness check on the publisher, not an age check on the facts**:
+
+| Mechanism | What it establishes |
+|---|---|
+| **Heartbeat.** On a fixed interval Atlas **requests a publication**, and the sequencer re-samples the foreground, bumping `Sequence` and `HeartbeatAtTicks` | Separates *"nothing has changed"* from *"the publisher has died"* — and **repairs** a missed foreground update rather than certifying it |
+| **`Sequence` is monotonic and gap-free** | A reader that sees it stop advancing across heartbeat intervals knows publication has stopped, whatever the content says |
+| **`ContextStale` fires on missed heartbeats only** — `now - HeartbeatAtTicks` beyond a small multiple of the interval | The refusal now means *"Atlas stopped publishing"*, which is a genuine fault, rather than *"the desktop has been quiet"*, which is not |
+
+> **Content age is never, on its own, a refusal reason.** An unchanged event-driven fact does not
+> decay.
+
+#### One sequencer: sampling, sequencing and swapping are one operation
+
+**An atomic swap orders the write; it does not order the writers.** Two paths publish `DesktopFacts`
+— the event path and the heartbeat — and if each samples independently and then swaps, this
+interleaving is available:
+
+| Step | Thread | Effect |
+|---|---|---|
+| 1 | heartbeat | samples the foreground: **A** |
+| 2 | — | the user switches windows; the foreground becomes **B** |
+| 3 | event path | samples **B**, takes sequence **41**, swaps |
+| 4 | heartbeat | takes sequence **42**, swaps its step-1 sample — **A** |
+
+The record now reads **A at sequence 42**: the content has gone *backwards* while carrying the
+*higher* sequence, so every consumer rule of the form "a higher sequence is a later observation" now
+points at the older one. The repair mechanism has become the corruption mechanism.
+
+So **neither path publishes. Both request publication**, and one Atlas-owned sequencer does the whole
+thing as one ordered operation ([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)):
+
+```
+request(reason) ──▶ ┌─────────── the sequencer ───────────┐
+                    │  1. sample the live facts           │
+                    │  2. allocate the next Sequence      │
+                    │  3. swap the immutable record       │
+                    └─────────────────────────────────────┘
+```
+
+> **Invariant.** A record with a higher `Sequence` was **sampled** later. Sequence order is
+> observation order — which is what the previous design claimed and did not have.
+
+**It is a serial agent, not a lock callers hold.** Requests enqueue; nobody blocks. A topology
+publication samples monitor geometry, and a lock held across an enumeration by whichever thread
+noticed the change is the shape that eventually stalls something that matters.
+
+**The hook thread is untouched.** It only ever *reads* the published reference — one atomic load, no
+coordination. Publication ordering is a producer-side concern and stays there.
+
+**Pending requests coalesce for free**, because the sequencer samples at execution time: N pending
+requests collapse to one sample of the same world.
+
+**An event request names the foreground it was notified about.** It still carries no sample to publish
+— the sequencer does all the sampling — but it does carry an *identity claim*: `EVENT_SYSTEM_FOREGROUND`
+names a window, so the event path knows which one it is reporting. The sequencer then counts a
+**heartbeat correction** when:
+
+> the foreground it just sampled was named by **no** request in this batch.
+
+*A coarser rule — "attributed event-driven if any request was" — cannot support the guarantee it was
+written for.* If the event path reports a change to X while a *different* change to Y was missed, a
+coalesced batch containing that X event suppresses the count, and the missed Y repair goes unrecorded.
+The metric would then under-report precisely when the event path is *partly* working, which is the
+interesting failure.
+
+**And the residual imprecision, stated rather than hidden.** Under rapid switching the sequencer can
+sample a foreground whose notification is still in flight, and count a correction the event path was
+about to report. That is an **over**-count — the safe direction for a health signal, since it prompts
+a look rather than concealing a fault — and it is why this is read as a **rate over time**, not as an
+exact tally of dropped notifications.
+
+#### The heartbeat re-samples; it does not rubber-stamp
+
+**A heartbeat that republishes the previous record unchanged is worse than no heartbeat**, and this is
+the subtlest thing in the section. If a foreground-change notification is missed — the event path
+hiccups, a notification is coalesced away, the subscription drops and re-establishes — then a
+liveness-only heartbeat keeps advancing `Sequence` on a record whose foreground is **wrong**, and it
+does so forever. The mechanism built to detect staleness would be actively attesting to it.
+
+So each heartbeat **re-reads the current foreground window** before publishing. A missed notification
+is therefore corrected within one interval, which turns an unbounded, undetectable error into a
+bounded one:
+
+> **Guarantee.** A missed foreground-change publication is repaired within one heartbeat interval.
+
+**When a heartbeat finds a foreground it was not told about, that is counted**, not silently fixed.
+Self-healing that leaves no trace hides a broken event path — the repair works, nobody learns the
+subscription is failing, and the counter is the only thing that distinguishes "healthy" from "quietly
+running on the fallback".
+
+**Why foreground and not the whole record.** Reading the foreground window is one call. Enumerating
+monitors is what a *snapshot* is for, and putting it on a timer would burn a full desktop enumeration
+forever to catch an event that has its own detection path. The asymmetry is not laziness, it is the
+difference in what a consumer can check:
+
+| Fact | Can a consumer detect a missed update? |
+|---|---|
+| **Monitor geometry / topology** | **Yes** — `TopologyGeneration` travels on the context, and a module that reads a full snapshot compares generations and refuses on a mismatch |
+| **Foreground window** | **No.** There is no generation to compare and nothing to compare it against; a wrong foreground is indistinguishable from a right one at the point of use |
+
+**The fact a consumer cannot validate is the one the publisher must repair.** That is the whole
+argument for re-sampling exactly this field.
+
+*The first version of this decision described the heartbeat as republishing an unchanged immutable
+record, and pointed at the generation comparison as the correctness check for everything. The
+generation comparison covers geometry only — foreground can change while topology is identical — so a
+missed foreground update would have stayed wrong indefinitely with the sequence advancing normally.*
+
+#### Facts that are unavailable are null, and facts that are cached say when
+
+```csharp
+// SKETCH — illustrative, not compiled.
+enum ContextOrigin { Hook, OsCallback, UserInterface, Timer }
+
+sealed record InvocationContext(
+    ContextOrigin Origin,
+    long CapturedAtTicks,            // monotonic, at recognition
+    Point? CursorPosition,           // PhysicalVirtualScreen; null for Timer
+    WindowRef? ForegroundWindow,     // null when there is none, or none resolvable
+    int TopologyGeneration,
+    long? FactsSequence);            // Hook origin: which DesktopFacts publication it read. Else null
+```
+
+Two honesty requirements the shape enforces:
+
+- **Nullable means "there may not be one", not "we did not bother".** A null foreground window is
+  ordinary — the desktop itself can have focus, and an elevated or secure window may not be
+  resolvable.
+- **A cached fact says which publication it came from, not how old it was.** On a `Hook` context,
+  `ForegroundWindow` is whatever publication `FactsSequence` identifies. A module that needs to know
+  the facts were live rather than published takes an `OsCallback`-origin path or reads a snapshot;
+  **it does not reason about the number of ticks that have passed**, because for an event-driven fact
+  that number means nothing.
+
+**Dispatch stamps a second time, and only a second time.** The payload also carries
+`DispatchedAtTicks`, so a module can see how long it sat in the queue and refuse work that has gone
+cold — without reading a clock in its handler, and without any part of the *context* being rewritten.
+Every field above is frozen at recognition.
+
+**Freshness against a full snapshot is still the caller's check.** A module that goes on to read an
+Atlas snapshot compares `TopologyGeneration`; a mismatch means refuse rather than proceed on mixed
+data.
+
+Refusals are values as everywhere else: `NoForegroundWindow`, `ForegroundNotManageable`,
+`NoMonitorUnderCursor`, `NoCursorForOrigin`, `ContextStale`.
+
+### 5.6 One interaction, one stream
+
+**A module must not compose two intent streams to reconstruct one interaction.** There is no ordering
+guarantee between kinds and there is deliberately not going to be one — providing it would mean
+specifying cross-stream ordering across the whole taxonomy to serve one consumer.
+
+The concrete case: a drag is the **input gesture** kind, whose payload carries the dragged
+`WindowRef` and an `InvocationContext`, and whose `Started`/`Ended` pairing is the cleanup guarantee.
+The window-event pair remains for consumers that want raw move/size transitions — but a drag-to-snap
+module subscribes to the gesture and nothing else. Zones' first draft used both and had an undefined
+race over which stream owned taking the overlay down
+([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
 
 ---
 
@@ -412,7 +1003,7 @@ drag; that anything survives a session lock, a fast-user-switch, or a UAC prompt
 
 ## 7. Adding a trigger kind — the extension contract
 
-The five kinds in §3 exist because a real consumer needed each one. A sixth needs the same
+The six kinds in §3 exist because a real consumer needed each one. A seventh needs the same
 justification. This section is the checklist for adding one: the point is that the fabric stays small
 and the modules stay ignorant of mechanism.
 
@@ -455,32 +1046,24 @@ and every future arbitration rule must cover.
 
 ---
 
-## 8. Status — designed and documented, not built
+## 8. Status — contract types compile, the fabric does not exist
 
-**No Conduit code exists.** There is no project, no namespace, no interface, no test. What exists is
-this document and [`src/pillars/conduit/README.md`](../src/pillars/conduit/README.md).
+**`Coordinator.Conduit.Core` exists and compiles** — the trigger-intent model, the registration
+outcome including first-class refusal, and the dispatch shape. CI built it on Ubuntu and Windows at
+`7aef6ff` (2026-08-08) with 0 warnings.
 
-Two separate honesty statements, both required whenever this pillar's status is described:
+**Nothing behind those declarations exists.** There is no registry, no arbiter, no dispatcher, no
+hook, no `Coordinator.Conduit.Shell`, and **no tests** — unlike Atlas, this pillar's interesting
+logic (arbitration) is not written yet, so there is nothing to test. Compiling a set of declarations
+proves they are well-formed and nothing more.
 
-1. **Nothing here has been compiled.** The environment this bootstrap was authored in had Python 3.11
-   and Node and **no .NET SDK**. The sketches on this page have never been through a compiler and
-   should be read as notation, not as code. The Python tooling (`tools/coord/coord.py`,
-   `tools/doc-audit/audit.py`) *has* been executed and its results are real; nothing C#-shaped in
-   this repository shares that status.
+Two honesty statements, both required whenever this pillar's status is described:
+
+1. **Not one input event has ever been dispatched.** No chord has been registered, no hook installed,
+   no gesture recognised, no wheel event swallowed or passed through.
 2. **Nothing here has been measured.** Every latency budget, every guarantee, every "always" and
-   "never" in §3 through §5 is a specification the implementation will be held to — not a
-   description of observed behavior. The gap closes in the order the roadmap says, and it closes
-   with recorded evidence: Core tests for the decidable half, a
-   [manual-validation](runbooks/manual-validation.md) pass for the rest.
-
-**Where it sits in the plan.** [COORDINATOR.md §8](COORDINATOR.md) puts Conduit in **P2 — Conduit
-and Atlas, minimum viable**, gated on Core tests covering arbitration (including the
-two-modules-one-chord case) plus a manual run on Windows recording a real chord firing and a real
-schedule firing. P2 is downstream of P1, whose first task is restoring the toolchain and compiling
-anything at all. The live task list is [NEXT.md](NEXT.md); the resume instructions for this pillar
-specifically are in its [README](../src/pillars/conduit/README.md).
-
----
+   every "never" on this page is a specification the implementation will be held to — not an
+   observation. §5.4 exists precisely because those numbers have to be *earned*.
 
 ## 9. Open questions and known dragons
 

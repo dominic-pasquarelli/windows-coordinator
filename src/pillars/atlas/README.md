@@ -19,10 +19,10 @@ related:
 > layout math that turns a template and a work area into rectangles.
 >
 > **One sentence:** this directory holds Atlas's model types and the layout math; the contract they
-> must satisfy is [docs/ATLAS.md](../../../docs/ATLAS.md), and **none of it has ever been
-> compiled**.
+> must satisfy is [docs/ATLAS.md](../../../docs/ATLAS.md), and **nothing here has ever observed a
+> desktop**.
 
-## Status: contract types written, never compiled
+## Status: model and math compile and are tested; nothing observes the desktop
 
 `Coordinator.Atlas.Core/` exists. It holds `Coordinator.Atlas.Core.csproj` and four source files:
 

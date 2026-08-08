@@ -422,6 +422,121 @@ not just the bug — it is a settings backup written immediately before any migr
 
 ---
 
+## 4.1 Zones scenarios (M1) — written ahead of the module, on purpose
+
+These six are written before Zones exists so the module has a target rather than a retrospective.
+Each names the thing no test can reach. Design:
+[src/modules/zones/docs/ARCHITECTURE.md](../../src/modules/zones/docs/ARCHITECTURE.md).
+
+### Z-1 — snap into a zone, on the monitor you meant
+
+**Proves:** drag-to-snap places a window in the zone the cursor was over, on the right monitor, with
+the right geometry — the basic claim of the module.
+
+1. Two monitors, a layout with at least three zones on each.
+2. Drag a window into a zone on the **secondary** monitor, snap modifier held. **Expect:** it fills
+   the zone; the overlay disappears on release.
+3. Repeat onto the primary. **Expect:** same.
+4. Compare the window's *visible* edges to the zone edges. **Expect:** flush — no one-pixel gap, no
+   overhang. A hairline of wallpaper means the invisible-border compensation is wrong, not the math.
+
+### Z-2 — a stack forms, and cycling walks it
+
+**Proves:** the headline feature, end to end.
+
+1. Drop three windows onto the same zone. **Expect:** each lands in front; the previous one is behind
+   it, not minimised — check the taskbar still shows all three.
+2. `Win` + wheel **one detent at a time, slowly**, over that zone. **Expect:** each detent advances
+   exactly one step in ring order.
+3. Now scroll **fast**. **Expect:** it still lands somewhere in ring order and no window is ever
+   skipped *in the order* or lost — but **N detents may advance fewer than N steps**. Ticks coalesce
+   under load by design ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)), so "one per detent" is
+   guaranteed only when you are not outrunning the dispatcher. A dropped tick is expected; a window
+   that never appears is a defect.
+4. Wheel the other way, slowly. **Expect:** the reverse order exactly.
+5. Minimise a member, then cycle to it. **Expect:** it is **restored and raised**, not skipped —
+   `Show`, not `Raise` ([ADR 0016](../decisions/0016-zone-occupancy-member-states.md)).
+6. Click a buried member's taskbar button, then cycle once. **Expect:** cycling continues from the
+   window you just raised, not from wherever the ring "thought" it was.
+
+### Z-3 — the wheel hook does not slow the desktop down
+
+**Proves:** the hook budget under real load — the risk that Zones makes every scroll on the machine
+slightly worse.
+
+1. With a stack armed, scroll normally in a browser, an editor, and a file list — **without** the
+   modifier. **Expect:** indistinguishable from Coordinator not running. Any perceptible stutter is a
+   finding, and a serious one.
+2. Repeat while the machine is busy (a build running). **Expect:** the same.
+3. Record the measured hook latency if instrumentation exists; otherwise record the subjective
+   verdict and say that is what it is.
+
+### Z-4 — the foreground lock ⚠ **run this first**
+
+**Proves:** whether `Activate` is permitted at all — the module's largest unknown
+([ADR 0014](../decisions/0014-atlas-explicit-raise-and-activate.md)).
+
+1. `zones.activate-on-cycle` **off**. Cycle a stack. **Expect:** the window comes to the front and
+   keyboard focus does **not** move — type, and the characters go where they went before.
+2. Turn it **on**. Cycle again. **Expect:** either focus moves, **or** a surfaced
+   `Refused(ForegroundLocked)`. **A silent no-op is a defect** — the whole point of the refusal is
+   that it is visible.
+3. Record which happened, on which Windows build. This single observation decides whether the setting
+   is worth keeping.
+
+### Z-5 — swallowing does not break scrolling
+
+**Proves:** the fail-open rule, which is what stops the module making the desktop worse.
+
+**This has to be a differential test.** Checking that "`Win`+wheel over an ordinary window does
+nothing" proves nothing at all — most applications ignore `Win`+wheel anyway, so you would see the
+same result whether the event was passed through or swallowed. The only way to observe pass-through
+is to compare against the same input with Coordinator not running.
+
+1. **Establish the baseline with Coordinator exited.** In a long document, note exactly what plain
+   wheel does (how far one detent scrolls) and what `Win`+wheel does (in most apps: nothing, but
+   whatever it is, write it down).
+2. Start Coordinator with a stacked zone somewhere **else** on screen. Repeat step 1 over the
+   document. **Expect:** byte-for-byte the same behaviour — same scroll distance, same response to
+   `Win`+wheel. Any difference is Coordinator interfering with an application it was never pointed at.
+3. Over the **stacked** zone: plain wheel scrolls the front window exactly as it did at baseline
+   (only the modified event is ever swallowed), and `Win`+wheel cycles.
+4. Remove windows until the stack has one left. **Expect:** the zone disarms — `Win`+wheel over it
+   now matches the step-1 baseline again.
+5. **Use an application that visibly responds to a modified wheel** for at least one repetition — a
+   browser (`Ctrl`+wheel zooms) is a good proxy for confirming that modified wheel events reach the
+   application at all when Coordinator is not arming that region.
+
+### Z-6 — one gesture, one lifecycle: the overlay always comes down
+
+**Proves:** Conduit's input-gesture guarantee that **exactly one `Ended` follows every `Started`**,
+which is the single mechanism Zones relies on for the overlay
+([ADR 0017](../decisions/0017-invocation-context-and-one-drag-lifecycle.md),
+[ARCHITECTURE §6](../../src/modules/zones/docs/ARCHITECTURE.md#6-drag-to-snap)). Its failure mode is
+an overlay stuck on the user's screen with no way to dismiss it.
+
+> **What this scenario is really testing.** Zones subscribes to the gesture stream and to **nothing
+> else** for dragging — the earlier design also used the window-event pair
+> `MoveSizeStart`/`MoveSizeEnd`, and had an undefined race over which stream owned taking the overlay
+> down. Each abort below is a different way for a drag to end *without a normal drop*, and the point
+> is that every one produces exactly one `Ended` from one stream. A stuck overlay here means the
+> guarantee is not real, which is a **Conduit** finding, not a Zones one — record it against the
+> pillar.
+
+1. Start a drag with the modifier, then press **Escape**. **Expect:** overlay gone, window unmoved.
+2. Start a drag, release outside any zone. **Expect:** overlay gone, window left where dropped.
+3. Start a drag and **lock the session** mid-drag (Win+L), then unlock. **Expect:** no overlay.
+4. Start a drag and unplug a monitor mid-drag. **Expect:** no overlay; no crash.
+5. Start a drag and **kill the dragged window's process** mid-drag (Task Manager). **Expect:** overlay
+   gone. The gesture must end even though the thing being dragged no longer exists.
+6. Complete an ordinary drop, then check the overlay count. **Expect:** exactly one overlay existed
+   and it is gone — not two stacked, which is what a second stream re-entering would produce.
+
+**Record the abort that failed, not just "Z-6 FAIL".** These six differ in *which* termination path
+the OS takes, and the one that breaks is the diagnosis.
+
+---
+
 ## 5. The per-release checklist
 
 Run before anything is delivered to a machine — including the owner's second machine, which is the
@@ -450,6 +565,7 @@ trip-wire that makes the delivery channel urgent ([NEXT.md](../NEXT.md)).
 | Anything that enumerates or observes the desktop | **S3**, plus **S4** |
 | Any settings-schema change | **S6** in full, including step 6 |
 | A new module | every scenario that module's docs name, plus **S1** and **S6** |
+| Anything in Zones | **Z-1**…**Z-6**; `Z-4` before any other Zones work |
 
 **A release with an unrun applicable scenario is not blocked — it is *recorded as such*.** Write down
 which scenarios were skipped and why. That is the never-force rule ([OPERATING_MODEL §2](../OPERATING_MODEL.md))
