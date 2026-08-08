@@ -26,6 +26,82 @@ related:
 
 ---
 
+## 2026-08-08 — Corrections to the accuracy audit (review of the audit itself)
+
+**Scope:** the previous entry's own output. Four findings, three of which are the **same class the
+audit was hunting** — which makes them the most useful entries in this log.
+
+**Counts:** `coord audit` 0/0/0 · closeout 0/0/0 · `coord map --check` clean · 11 scaffold tests
+green.
+
+### Fixed
+
+1. 🔴 **`tools/doc-audit/audit.py` and `tools/doc-audit/README.md` both still said "not one line of
+   its C# has been compiled."** The sentence conflated two claims — *no SDK in the authoring
+   environment* (still true) and *never compiled anywhere* (false since `7aef6ff`) — and the true
+   half kept the false half looking correct. Now separated: the checker has no compiler; CI does;
+   neither changes what a textual check means.
+2. 🟡 **The README said "Fifteen checks" above a sixteen-row table** — stale by exactly the
+   `projectref` row the previous entry added. Verified mechanically this time: **16 table rows, 16
+   emitted ids, no difference in either direction.**
+3. 🟡 **`README.md` and `docs/ONBOARDING.md` still called `src/modules/` "empty by design today."**
+   The previous pass fixed the `tests/` line **in the same two tree diagrams** and did not read the
+   line above it.
+4. 🔴 **The accuracy fix was a postponement, not a fix** — see below.
+
+### Finding 3 is the one worth internalising
+
+The previous entry named the pattern — *status text in structural positions* — and then fixed one
+line of a two-line diagram twice. **Knowing the pattern did not produce a systematic sweep; it
+produced a targeted grep for the specific string already in hand.** The correct move, once a
+structural position is implicated, is to re-read *that whole structure* — every row of the table,
+every line of the diagram — rather than the line matching the current query. Lens A already says
+"verify every row, never a sample" about tables; the same applies to any structural block, and this
+is the second consecutive round where a tree diagram carried the drift.
+
+### The accuracy anchor — a real fix this time
+
+The previous entry skipped the commit arm while `audited` was **today**. Review: that only moves the
+defect a day. The arm counted commits since **midnight on the audited date**, so on 2026-08-09 a doc
+audited at the end of a busy 2026-08-08 is charged for every commit that day — **including the ones
+that landed before the audit** — and reports stale with nothing changed since.
+
+Both failures are one root cause: **the date is day-granular, the audit is an instant, and only git
+knows which.** So the count is now anchored to the **commit that introduced the doc's current
+`audited:` line** (`git log -1 -S`), and counts `anchor..HEAD`. No schema change, exact regardless of
+how many commits share a day, and it answers the question actually being asked — *how much has landed
+since someone last confirmed this doc?*
+
+**A/B on the reviewer's exact scenario** (`tests/README.md`, audited 2026-08-08, untouched, evaluated
+as if it were 2026-08-09):
+
+| Basis | Count | Stale? |
+|---|---|---|
+| Old — since date midnight | **18** | **yes** ← false positive, nothing changed since the audit |
+| New — since the audit commit | **15** | **no** ✓ |
+
+The 3-commit gap is exactly the commits that preceded the audit that day. And the guard is intact: a
+doc anchored at the root commit sees 17 → **stale**, as it should. An uncommitted or untracked stamp
+returns `None` and the arm is dropped — degrading to "unknown" rather than to a false warning, which
+is the same asymmetry `_repo_commits_since` already documented.
+
+### Backlog
+
+- **`audit.py` has no test harness**, so the three guard proofs in this log and the last are recorded
+  numbers rather than a regression test. CI discovers only `tools/coord/tests`; adding a second
+  discover path plus `tools/doc-audit/tests/` is the fix, and it is the right home for the anchor A/B
+  above. Filed rather than done: it is a CI-config change, out of scope for a correction pass.
+- The five normative docs from the previous entry remain unstamped and unread end to end.
+
+### Note on scope
+
+This audit work is **scope creep on a PR whose subject is the Zones design** — authorised (it was
+requested before merge) but not thematically part of it. Recorded because the reviewer was right to
+flag it: the Zones design was approved at `04710b8`, and everything after that commit is repository
+maintenance that happens to share a branch.
+
+---
+
 ## 2026-08-08 — Accuracy audit before merging PR #2 (`/audit`, whole repository)
 
 **Scope:** the whole repository, driven by the 27-doc accuracy backlog. Requested explicitly as

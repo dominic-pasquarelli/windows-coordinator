@@ -162,7 +162,7 @@ src/
   platform/          the platform core — host, registry, identity, settings, update channel
   pillars/conduit/   Conduit — input & trigger fabric
   pillars/atlas/     Atlas — desktop spatial truth
-  modules/           one self-contained directory per module (empty by design today)
+  modules/           one per module — `zones/` is documentation only, deliberately unscaffolded
   shell/             the WinUI settings + dashboard host (Windows-only)
 
 tests/               two Core test projects (Atlas, Platform) — net9.0, run anywhere

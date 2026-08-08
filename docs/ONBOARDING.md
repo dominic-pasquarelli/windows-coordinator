@@ -116,7 +116,7 @@ docs/                architecture, pillars, specs, protocols, ADRs, runbooks
 src/platform/        platform core — host, registry, identity, settings, update channel
 src/pillars/conduit/ Conduit
 src/pillars/atlas/   Atlas
-src/modules/         one self-contained directory per module (empty by design today)
+src/modules/         one per module — `zones/` is documentation only, deliberately unscaffolded
 src/shell/           the WinUI settings + dashboard host (Windows-only)
 tests/               two Core test projects (Atlas, Platform) — net9.0, run anywhere
 tools/coord/         the `coord` CLI (stdlib-only Python)

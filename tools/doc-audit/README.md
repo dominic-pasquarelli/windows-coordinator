@@ -41,8 +41,10 @@ claimed outcome actually occurred ([OPERATING_MODEL §7](../../docs/OPERATING_MO
 about links, paths, frontmatter, the ADR sequence and the generated map is real, and its findings are
 about files that really are or are not on disk.
 
-**No .NET SDK has ever been present in the environment this project was authored in, and not one
-line of its C# has been compiled.** The `boundary` check reads `using` directives, namespace
+**No .NET SDK is present in the environment this project is authored in, so this checker never has a
+compiler available.** (CI does: as of `7aef6ff` it compiles every project on Ubuntu and Windows. That
+does not soften anything below — this tool's answer is textual either way, on every machine.) The
+`boundary` check reads `using` directives, namespace
 declarations, `[DllImport]` attributes and `.csproj` `<ProjectReference>` elements as *text*. It does
 genuine work — it will catch Win32 leaking into a Core project — but a green boundary result means
 *"the obvious leaks are absent"*, never *"the boundary is proven"*, and a green audit is never a
@@ -93,7 +95,7 @@ working-tree edits are therefore not covered — commit first if you meant to ch
 
 ## What it checks
 
-Fifteen checks. The ids are stable, and **this table is their single canonical home** —
+Sixteen checks. The ids are stable, and **this table is their single canonical home** —
 [AUDIT.md §8](../../docs/AUDIT.md) discusses what the mechanical half can and cannot judge, and
 links here for the list itself rather than keeping a second copy.
 
