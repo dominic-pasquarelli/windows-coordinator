@@ -262,16 +262,18 @@ misbehaves you already know the model is not the cause.
    first design could not represent (ADR 0015, ADR 0016). Then the two edge clusters ADR 0020 closes:
    **dormancy** (a monitor leaving the snapshot, and the `Positional`-match case that must *not* wake
    a stack) and the six **displacement** rows of ARCHITECTURE §6.1.
-1b. **The layout designer** — `Grid`, `Split`, `Merge`, each returning a **`LayoutEdit` transaction**
-   rather than a template (ADR 0019), with merge's tiles-its-bounding-box predicate tested
-   exhaustively over a 3×3 grid and the cell-id survival rules from ADR 0018. The tests that matter
-   most are the ones asserting a split and a merge **re-place members whose cell id did not change** —
-   a template-only assertion passes while the windows sit at the old size. Pure arithmetic, no UI, no
-   desktop.
+1b. **The layout designer** — `Grid` as a **constructor** (two integers → a fresh template; no
+   occupancy, no remap, no placements), and `Split` / `Merge` as **edits** returning a `LayoutEdit`
+   transaction (ADR 0019), with merge's tiles-its-bounding-box predicate tested exhaustively over a
+   3×3 grid and the cell-id survival rules from ADR 0018. The tests that matter most are the ones
+   asserting a split and a merge **re-place members whose cell id did not change** — a template-only
+   assertion passes while the windows sit at the old size. Pure arithmetic, no UI, no desktop.
 2. **Armed-region computation**, with the test that a zone leaves the armed set the moment its depth
    drops below two — the test that stops `Win`+wheel swallowing scroll over ordinary windows — and the
    refusal path (previous set stays active · subtraction retry accepted · empty set always accepted),
-   which is what §7.3's recovery is built on.
+   which is what §7.3's recovery is built on. Then the **revocation** handler: a grant is a lease, so
+   a higher-priority module can take a region mid-session and Zones must mark those zones un-cyclable
+   **without republishing** (§7.4).
 3. **Settings shape** and its migration path, before any UI.
 4. **The Atlas raise path** (ADR 0014) and manual-validation `Z-4` — *do this early*. The foreground
    lock is the module's largest unknown and among the cheapest to resolve; the design already

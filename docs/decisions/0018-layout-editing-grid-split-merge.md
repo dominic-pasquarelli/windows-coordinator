@@ -29,16 +29,26 @@ only if they tile their bounding box exactly.
 
 Three pure operations, each returning a result that can be a **refusal**.
 
-> **Amended by [ADR 0019](0019-layout-edits-are-a-transaction.md).** As first written, all three took
-> and returned a `LayoutTemplate` — which cannot express the occupancy consequences this ADR goes on
-> to describe (merge concatenating rings), and cannot signal that a surviving cell's stack needs
-> re-placing. They now take the template *and* the occupancy over it, and return a `LayoutEdit`. Read
-> the id rules below as the content of `CellRemap` and `RetiredCellIds`.
+> **Amended by [ADR 0019](0019-layout-edits-are-a-transaction.md), for `Split` and `Merge` only.** As
+> first written, both took and returned a `LayoutTemplate` — which cannot express the occupancy
+> consequences this ADR goes on to describe (merge concatenating rings), and cannot signal that a
+> surviving cell's stack needs re-placing. They now take the template *and* the occupancy over it, and
+> return a `LayoutEdit`. Read the id rules below as the content of `CellRemap` and `RetiredCellIds`.
+>
+> **`Grid` is unchanged and remains a constructor** — see the last entry under *Alternatives
+> considered*, which is the decision that keeps it one. It takes two integers, returns a fresh
+> template, and has no occupancy, no remapping and no placements, because it has no prior template to
+> remap from.
 
-### `Grid(columns, rows)`
+### `Grid(columns, rows)` — a constructor, not an edit
 
 Builds a template of `columns × rows` uniform cells. Ids are positional and stable: `r{row}c{col}`,
 zero-based. Refuses `columns < 1`, `rows < 1`, or a product beyond a sanity cap.
+
+**It takes no existing template and no occupancy**, so it produces no cell remapping, no retired ids
+and no placement actions. Its result is a new layout in the library; applying it to a monitor is a
+**layout switch**, which releases the previous layout's windows as unassigned. That is deliberately a
+different operation from the two below — see the final alternative.
 
 ### `Split(template, cellId, axis, fraction = 0.5)`
 

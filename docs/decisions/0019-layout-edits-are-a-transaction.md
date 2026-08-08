@@ -7,7 +7,8 @@ Status: Accepted · Corrects [ADR 0018](0018-layout-editing-grid-split-merge.md)
 
 [ADR 0018](0018-layout-editing-grid-split-merge.md) described `Grid`, `Split` and `Merge` as pure
 functions **over a `LayoutTemplate`**, and separately claimed that merging combines the merged cells'
-occupancy rings. Review of PR #2 established two problems with that, and they are the same problem
+occupancy rings. (`Grid` is a constructor and stays one — see the Decision; the problem below is
+about the two operations that edit an existing layout.) Review of PR #2 established two problems with that, and they are the same problem
 seen from two sides.
 
 **A template-only function cannot transform occupancy.** Merge is specified to concatenate rings; a
@@ -52,9 +53,20 @@ sealed record LayoutEdit(
     IReadOnlyList<PlacementAction> Placements);       // every geometrically affected member
 ```
 
-`Grid`, `Split` and `Merge` each return one of these, or a refusal. The four outputs are produced
-together because they are one decision: you cannot know which members need re-placing without
-knowing how cells were remapped, and you cannot remap rings without knowing which ids survived.
+**`Split` and `Merge` return one of these, or a refusal. `Grid` does not** — it is a *constructor*,
+not an edit, and [ADR 0018](0018-layout-editing-grid-split-merge.md) decided that deliberately. It
+takes two integers and returns a fresh `LayoutTemplate` at revision 1; there is no prior template to
+remap from, no occupancy to transform, and nothing to re-place. Putting the new layout on a monitor is
+a **layout switch**, which releases the previous layout's windows as unassigned — a different
+operation with a different consequence.
+
+*The first draft of this ADR listed `Grid` alongside the other two and gave it an occupancy
+parameter, which quietly reinstated the grid-as-edit design ADR 0018 had rejected. Corrected here:
+the transaction applies to the two operations that genuinely edit a layout in place.*
+
+The six outputs are produced together because they are one decision: you cannot know which members
+need re-placing without knowing how cells were remapped, and you cannot remap rings without knowing
+which ids survived.
 
 **Every geometrically affected member gets a `PlacementAction`** — including members of a ring whose
 cell id did not change. That is the whole point: id stability is what makes stacks survive an edit,

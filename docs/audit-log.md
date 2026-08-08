@@ -26,6 +26,64 @@ related:
 
 ---
 
+## 2026-08-08 — PR #2 round 5: four contradictions between a rule and its own mechanism
+
+**Scope:** the two pillar contracts and the Zones designer, re-read against a review that found four
+places where a decision and the mechanism implementing it disagreed.
+
+**Mechanical result:** `coord audit` 0/0/0 · `coord audit --since origin/main` 0/0/0 ·
+`coord map --check` clean · 11 scaffold tests green. **No C# changed.** Nothing has run on Windows.
+
+### The four
+
+| # | Contradiction | Landed as |
+|---|---|---|
+| 1 | §5.5 classified a hotkey chord as `Hook` origin and said its cursor came from the event structure — but §3.1 makes plain chords **kernel registrations**, and neither `WM_HOTKEY` nor `KBDLLHOOKSTRUCT` carries a cursor | Chords are **`OsCallback`** origin, sampled live while handling `WM_HOTKEY`. `Hook` is now exactly the two **mouse**-driven kinds, so "cursor from the event structure" holds by construction |
+| 2 | `ContextStale` fired on the *age* of the `DesktopFacts` record — which is event-driven, so age measures how quiet the desktop has been, not whether the record is right | **Heartbeat + monotonic sequence.** Staleness is a liveness check on the publisher; content age is never on its own a refusal reason; correctness comes from the generation comparison |
+| 3 | Arbitration was "user priority, then stable module id" **and** "a lower-priority incumbent keeps what it holds" | A grant is a **revocable lease**. Higher priority preempts and the loser is told (`RegionsRevoked`); lower priority is refused. Zones §7.4 handles the inbound case |
+| 4 | ADR 0018 made `Grid` a constructor and explicitly rejected grid-as-edit; ADR 0019 and ARCHITECTURE gave it a template, occupancy, and a `LayoutEdit` return | **`Grid` is a constructor**, restored. `Split`/`Merge` are the edits. Applying a new grid to a monitor is a *layout switch*, a different operation with a different consequence |
+
+### The pattern — and it is not last round's pattern
+
+Round 4's three defects were **prose the type signature could not express**. These four are the
+mirror: **a rule contradicted by the mechanism named elsewhere in the same document.** Every one is
+findable by holding two sections side by side —
+
+- §5.5's origin table against §3.1's "registrations for plain chords, hooks only for the two pointer
+  kinds";
+- the age threshold against §3.6's "republishes *when it changes*";
+- "priority decides" against "the incumbent keeps it";
+- ADR 0019's signature against ADR 0018's rejected alternative.
+
+None needed new information. Each needed the two statements read together, which is exactly what
+authoring them in separate sittings prevents. **Worth adding to the audit's Lens B habit: when a
+decision is made in one doc and implemented in another, read the pair — the drift lives in the join,
+not in either half.**
+
+Two of the four also share a sharper root: **a proxy standing in for the thing it approximates.**
+Content age was a proxy for correctness; arrival order was a proxy for priority. Both read as
+principled until you ask what happens when the proxy and the real property diverge — an idle desktop,
+a reordered load. The heartbeat and the lease are what it costs to stop approximating.
+
+### Guards added, with their proofs specified
+
+[CONDUIT §5.4](CONDUIT.md#54-proving-the-guard-not-asserting-it) gains two entries, both written so
+the guard has to be *seen* failing:
+
+- **Liveness, tested in both directions** — a fake clock advancing far past the heartbeat interval
+  *with the publisher alive* must **not** produce `ContextStale`. That is the assertion the rejected
+  age-threshold design fails, and without it a liveness check is indistinguishable from an age check.
+- **Arbitration by permutation** — the same request set published in several orders must produce an
+  identical armed map. A single-order test passes just as happily under "first wins".
+
+### Still owed
+
+- P1 and P2 before any Zones code. `Z-1`…`Z-6` remain written and never executed.
+- The design is now *fully specified and entirely unimplemented*; five rounds of review have improved
+  the specification and moved the implementation not at all, which is the honest summary of this PR.
+
+---
+
 ## 2026-08-08 — PR #2 round 4: the four implementation-forcing gaps in the Zones design
 
 **Scope:** the Zones module design and the two pillar contracts it extends, re-read against a review

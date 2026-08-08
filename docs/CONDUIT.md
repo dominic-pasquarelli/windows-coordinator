@@ -299,11 +299,12 @@ constantly — every layout change, every stack that crosses depth two. So:
 
 | Question | Answer |
 |---|---|
-| A new set overlaps another owner | The **update is refused** (`RegionsOverlapAnotherOwner`), **naming the contested rectangles** |
+| A new set overlaps a **higher**-priority owner | The **update is refused** (`RegionsOverlapAnotherOwner`), **naming the contested rectangles** |
+| A new set overlaps a **lower**-priority owner | The update is **granted**, and the incumbent's lease over the contested rectangles is **revoked and the revocation delivered to it** — never silently |
 | Is a refusal ever partial | **No.** A set is accepted whole or refused whole. A silently-trimmed set would leave a module believing it armed regions it does not own |
 | What happens to the previous set after a refusal | **It stays active.** Silently disarming on a failed update would break cycling with no signal — the module would believe it had regions and have none |
-| Who wins an overlap | See *stable priority* below. Never "whoever got there first" |
-| How an owner gives up a region | Only by updating or unregistering. There is no revocation-by-preemption |
+| Who wins an overlap | **Explicit user priority, then stable module id** — see below. Never "whoever got there first" |
+| How an owner gives up a region | By updating, by unregistering, **or by being revoked by a higher-priority claim** |
 | Can **withdrawing** be refused | **Never.** Publishing a set that is a subset of one you already own, or the empty set, always succeeds — see *withdrawal always succeeds* below |
 | Where the topology generation comes from | **Atlas**, carried on the set by the publishing module, which got it from the snapshot it computed against. Conduit compares it with the generation it last observed from Atlas |
 
@@ -315,7 +316,7 @@ when loading is parallelised later. An arbitration rule built on it produces a d
 different runs of the same configuration, and the loser has no way to find out why. That is the same
 class of defect as an unstable sort — invisible until it matters, then impossible to reason about.
 
-The rule is instead, in order:
+The order is:
 
 1. **Explicit user priority.** A per-module integer in platform settings, default 0, higher wins.
    This is the only knob, it is visible in the Shell, and it exists so an overlap the user cares about
@@ -324,15 +325,47 @@ The rule is instead, in order:
    Arbitrary, and *deterministic across runs, machines and load orders*, which is the property that
    matters. Nothing here depends on when anything registered.
 
-**Conduit still never silently steals a region from its current owner.** Priority decides who is
-*allowed* to arm a contested rectangle, and a lower-priority incumbent keeps what it holds until it
-republishes. Priority is not preemption; it decides refusals, not evictions.
+#### A region grant is a revocable lease, because the alternative smuggles registration order back in
+
+**Stable priority and "the incumbent always keeps it" cannot both hold.** If a lower-priority module
+keeps a contested rectangle merely because it published first, then the winner is still decided by who
+arrived first — the priority order is decoration, and the arbitration rule is the very thing it
+claimed to replace, one level down. *An earlier draft of this section asserted both, and this
+paragraph is the retraction.*
+
+So a grant is a **lease**, in the sense the [Core/Shell table](#6-the-coreshell-split-applied-here)
+already gives Conduit, and preemption is real:
+
+- A publication from a **higher**-priority module over a contested rectangle **succeeds**, and the
+  incumbent's lease over exactly those rectangles is revoked.
+- **Revocation is delivered, never silent.** The preempted module receives a `RegionsRevoked`
+  notification naming the rectangles it lost — an ordinary dispatch on a worker, not on the hook
+  thread. Conduit replaces that module's armed set with the surviving subset, which is safe precisely
+  because a subset publication is the one thing that can never be refused.
+- A publication from a **lower**-priority module over a contested rectangle is **refused**, naming the
+  rectangles, and the module takes the subtraction path below.
+
+**The property this buys, and the reason it is the right shape:** the armed map is a **pure function
+of the current request set and the priority order**, with arrival order nowhere in it. Whether the
+high-priority module publishes before or after the low-priority one, the same module ends up holding
+the rectangle — refused-then-retried in one order, granted-then-revoked in the other. Two runs of the
+same configuration arm identically, which is the whole point of replacing "first wins".
+
+The cost is honest: a module can lose a region it was using, at a moment it did not choose. That is
+what makes the notification load-bearing rather than courteous — a module must handle `RegionsRevoked`
+as a real state change, and a feature built on armed regions has to degrade gracefully when they are
+taken away. Zones' version of that is
+[ARCHITECTURE §7.3](../src/modules/zones/docs/ARCHITECTURE.md#73-applying-an-edit).
 
 #### Withdrawal always succeeds
 
 Arming is a request. **Disarming is not** — a module may always publish a set that adds no rectangle
 it did not already own, and the empty set is always accepted. Without this rule a module can get
 stuck holding regions it has decided are wrong, and there is no safe state to fall back to.
+
+It is also what makes **revocation** implementable: Conduit trimming a preempted module's set to the
+surviving subset is a withdrawal-direction change, so it can never itself be refused, and there is no
+state in which a revocation gets stuck half-applied.
 
 This is what makes a refused update recoverable rather than a dead end. The refusal names the
 contested rectangles, so the retry is a subtraction rather than a search:
@@ -501,6 +534,15 @@ advance so it does not get negotiated later:
 - The queue's drop-and-count path gets a test that fills the queue and asserts the drop count,
   because a queue that silently grows under load looks identical to a healthy one right up until the
   machine is out of memory.
+- **The publisher-liveness check (§5.5) gets tests in both directions, and the second one is the
+  point.** A fake clock advances well past the heartbeat interval *with the publisher heartbeating*
+  and the context must **not** be `ContextStale` — that is the assertion the rejected age-threshold
+  design would fail, and without it nothing distinguishes a liveness check from the age check it
+  replaced. Then the publisher stops and the same elapsed time must produce `ContextStale`.
+- **Arbitration determinism (§3.6) is tested by permutation, not by example.** The same set of region
+  requests is published in several different orders and the resulting armed map must be identical
+  every time. A single-order test passes just as happily under "first wins", so it proves nothing
+  about the property that was actually bought.
 - **Latency itself cannot be tested this way**, and pretending otherwise would be the exact failure
   §7 names. Actual hook latency is a [manual-validation](runbooks/manual-validation.md) row, measured
   on a real desktop, recorded with a date and a machine. No Core test result may ever be described as evidence about it.
@@ -550,10 +592,28 @@ source. The context names its own origin so a module can tell which guarantees i
 
 | Origin | Recognized on | Captures | Notes |
 |---|---|---|---|
-| **Hook** — chord, pointer gesture, input gesture | the low-level hook thread, under §5.1's budget | cursor and timestamp **from the event structure itself** (they are already in it); everything else from the **atomically-published desktop facts** — one reference read | **May not call Atlas, or anything else.** §5.2's forbidden list is not relaxed for context capture |
-| **OS callback** — window event | a callback thread with no microsecond budget | a live Atlas point sample at recognition | The one origin where "sample now" is both allowed and accurate |
+| **Hook** — pointer gesture (§3.6), input gesture (§3.5) | the low-level hook thread, under §5.1's budget | cursor and timestamp **from the event structure itself**; everything else from the **atomically-published desktop facts** — one reference read | **May not call Atlas, or anything else.** §5.2's forbidden list is not relaxed for context capture |
+| **OS callback** — **hotkey chord (§3.1)**, window event (§3.2) | a message-loop or callback thread, with no microsecond budget | a live Atlas point sample at recognition | The origin where "sample now" is both allowed and accurate |
 | **UI** — tray action, menu item | the UI thread | a live point sample, plus the invoking menu item | Cursor is where the user clicked the menu, which is what they mean |
 | **Timer** — schedule | a timer thread | **no cursor and no foreground at all** | A 25-minute tick has no event-time cursor. The fields are null and `Origin` says why — not a fabricated "wherever the mouse happens to be" |
+
+**`Hook` is exactly the two pointer-driven kinds, and that is not an arbitrary grouping — it is what
+makes the row above true.** §3.1's mechanism decision means plain chords are **kernel registrations,
+not hooks**: they arrive as `WM_HOTKEY` on a message loop, where a live point sample is both permitted
+and correct. The two pointer kinds are the only hook-recognized intents Conduit has, they are both
+**mouse**-driven, and a mouse hook's event structure carries the cursor. So "the cursor comes from the
+event structure" holds for every `Hook` context by construction rather than by luck.
+
+> **The trip-wire, recorded because §3.1 invites the revisit.** If a future intent ever needs a
+> low-level **keyboard** hook, it does **not** join this row. A keyboard hook's event structure has no
+> cursor coordinates, and the hook thread may not sample one — so such an intent would capture a
+> **null** cursor, and Conduit must refuse to bind a cursor-dependent capability to it **at
+> registration time**, not fail at dispatch. Adding a keyboard-hook kind without answering that is
+> adding a capability that silently does nothing.
+>
+> *An earlier draft of this section listed the chord under `Hook` and claimed its cursor came from the
+> event structure. Neither `WM_HOTKEY` nor `KBDLLHOOKSTRUCT` carries one — the row was describing a
+> mouse hook and labelling it "keyboard or mouse".*
 
 #### The published desktop facts
 
@@ -566,12 +626,42 @@ sealed record DesktopFacts(
     WindowRef? ForegroundWindow,
     IReadOnlyList<MonitorGeometry> Monitors,
     int TopologyGeneration,
-    long PublishedAtTicks);
+    long Sequence,              // monotonic; bumped by every publication, change or heartbeat
+    long HeartbeatAtTicks);     // when the publisher last proved it was alive
 ```
 
 **Publication follows §3.6's contract exactly** — immutable value, atomic reference swap, Conduit owns
 the lifetime, the reader never blocks. It is deliberately the same mechanism as the armed region set
 rather than a second one: there is one way in this pillar to hand data to the hook thread.
+
+#### Age is not staleness — the publisher's liveness is
+
+These are **event-driven** facts. Atlas republishes when the foreground window or the topology
+changes, so on a desktop nobody is touching, a record can be an hour old and **completely correct**.
+A threshold on content age is therefore wrong in both directions, and each direction is its own bug:
+
+- **False positives that get worse the longer things are fine.** An hour of no window switching would
+  make every hook gesture refuse `ContextStale` — the feature breaking *because* the desktop was
+  stable, which is the failure mode hardest to reproduce and easiest to disbelieve.
+- **False negatives.** A record published 5 ms ago is *recent* and still wrong if the publication
+  after it was missed. Recency was never evidence of correctness; it was a proxy for it.
+
+So the staleness test is a **liveness check on the publisher, not an age check on the facts**:
+
+| Mechanism | What it establishes |
+|---|---|
+| **Heartbeat.** Atlas republishes on a fixed interval even when nothing changed, bumping `Sequence` and `HeartbeatAtTicks` | Separates *"nothing has changed"* from *"the publisher has died"* — the two states an age threshold cannot tell apart |
+| **`Sequence` is monotonic and gap-free** | A reader that sees it stop advancing across heartbeat intervals knows publication has stopped, whatever the content says |
+| **`ContextStale` fires on missed heartbeats only** — `now - HeartbeatAtTicks` beyond a small multiple of the interval | The refusal now means *"Atlas stopped publishing"*, which is a genuine fault, rather than *"the desktop has been quiet"*, which is not |
+
+> **Content age is never, on its own, a refusal reason.** An unchanged event-driven fact does not
+> decay.
+
+**And the missed-update case is answered by validation, not by timing.** `TopologyGeneration` travels
+on the context, so a module that goes on to read a full Atlas snapshot compares generations and
+refuses on a mismatch — which catches a wrong record regardless of how new it was. That is the check
+that actually establishes correctness; the heartbeat only establishes that someone is still
+publishing.
 
 #### Facts that are unavailable are null, and facts that are cached say when
 
@@ -585,7 +675,7 @@ sealed record InvocationContext(
     Point? CursorPosition,           // PhysicalVirtualScreen; null for Timer
     WindowRef? ForegroundWindow,     // null when there is none, or none resolvable
     int TopologyGeneration,
-    long FactsPublishedAtTicks);     // Hook origin: how old the cached facts were. Else == CapturedAtTicks
+    long? FactsSequence);            // Hook origin: which DesktopFacts publication it read. Else null
 ```
 
 Two honesty requirements the shape enforces:
@@ -593,11 +683,11 @@ Two honesty requirements the shape enforces:
 - **Nullable means "there may not be one", not "we did not bother".** A null foreground window is
   ordinary — the desktop itself can have focus, and an elevated or secure window may not be
   resolvable.
-- **A cached fact carries its own age.** On a `Hook` context, `ForegroundWindow` is true as of
-  `FactsPublishedAtTicks`, not as of `CapturedAtTicks`, and the payload says so rather than implying a
-  freshness it does not have. Conduit marks a context `ContextStale` when that gap exceeds a bound —
-  which in practice means Atlas's publication has broken, since foreground changes republish
-  immediately.
+- **A cached fact says which publication it came from, not how old it was.** On a `Hook` context,
+  `ForegroundWindow` is whatever publication `FactsSequence` identifies. A module that needs to know
+  the facts were live rather than published takes an `OsCallback`-origin path or reads a snapshot;
+  **it does not reason about the number of ticks that have passed**, because for an event-driven fact
+  that number means nothing.
 
 **Dispatch stamps a second time, and only a second time.** The payload also carries
 `DispatchedAtTicks`, so a module can see how long it sat in the queue and refuse work that has gone

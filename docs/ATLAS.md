@@ -165,15 +165,28 @@ captures the invocation context at *recognition*, and for a hook-thread recogniz
 a microsecond budget where calling Atlas is forbidden outright
 ([CONDUIT §5.2](CONDUIT.md#52-what-may-happen-inside-a-hook-callback)). So Atlas additionally
 **publishes an immutable `DesktopFacts` record** — foreground window, monitor geometry, topology
-generation, publication stamp — and republishes it whenever the foreground window or the topology
-changes. Publication is an atomic reference swap under
+generation, a monotonic sequence number — and republishes it whenever the foreground window or the
+topology changes. Publication is an atomic reference swap under
 [CONDUIT §3.6](CONDUIT.md#36-pointer-gesture)'s contract, so the hook thread's read is a reference
 load with a known worst case.
 
+**Atlas also heartbeats it**, republishing on a fixed interval with a bumped sequence even when
+nothing has changed. That is the one part of this that is not obvious, and it exists because
+`DesktopFacts` is **event-driven**: on a desktop nobody is touching, a record can be an hour old and
+completely correct, so *age cannot be the staleness test*. Without a heartbeat there is no way to
+distinguish "nothing has changed" from "Atlas stopped publishing", and any age threshold would
+eventually reject every hook gesture on a stable desktop — the feature failing *because* things were
+calm.
+
+**This is §4's rule about snapshots, applied to a second surface.** A snapshot is stamped but never
+self-aging, and freshness is computed by the reader; here the producer likewise never asserts
+"this is fresh". It asserts *which publication this is* and *that publication is still running*.
+What establishes correctness is the reader comparing `TopologyGeneration` against a snapshot — not a
+tick count ([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
+
 The two paths answer different questions and the difference is deliberate: a point sample is *live but
-only where it is safe to take one*; the published record is *safe to read anywhere but true as of its
-stamp*, which is why a context built from it carries that stamp
-([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
+only where it is safe to take one*; the published record is *safe to read anywhere, and identified by
+sequence rather than by freshness*.
 
 ---
 

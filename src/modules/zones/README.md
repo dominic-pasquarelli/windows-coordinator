@@ -47,18 +47,21 @@ is in [docs/NEXT.md](../../../docs/NEXT.md).
 ## Designing a layout
 
 Three operations, all pure and all host-testable
-([ARCHITECTURE §7](docs/ARCHITECTURE.md#7-the-layout-designer)):
+([ARCHITECTURE §7](docs/ARCHITECTURE.md#7-the-layout-designer)) — **one builds a layout, two edit
+one**:
 
-- **Grid** — type a column and row count, get that grid.
-- **Split** — divide an existing cell along either axis.
+- **Grid** — type a column and row count, get that grid. A *constructor*: it returns a fresh template
+  and nothing else. Putting it on a monitor is a layout switch, not an edit.
+- **Split** — divide an existing cell along either axis. An *edit*.
 - **Merge** — combine cells back together, **refused unless they tile their bounding box exactly**.
+  An *edit*.
 
 The interesting part is not the arithmetic; it is that a cell id is a permanent contract, so an edit
 has to say what happens to the stacks addressed by the cells it changes. Split keeps the id on the
 first fragment; merge keeps the first cell's id in reading order, retires the rest permanently, and
 concatenates their stacks into the survivor.
 
-**Which is why an edit is a transaction, not a new template.** Each operation returns the new
+**Which is why an edit is a transaction, not a new template.** Split and merge return the new
 template *and* its bumped revision, the cell remapping, the retired ids, the transformed occupancy,
 and a placement for every geometrically affected window — including windows in a cell whose id did
 not change, which is exactly the case id stability hides

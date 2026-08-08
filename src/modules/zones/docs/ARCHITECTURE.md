@@ -370,19 +370,39 @@ Authoring a layout by typing fractions is not something anyone does twice. Three
 **pure** and therefore all host-tested with no desktop
 ([ADR 0018](../../../../docs/decisions/0018-layout-editing-grid-split-merge.md)):
 
-| Operation | What it does |
-|---|---|
-| `Grid(columns, rows)` | Type two numbers, get that grid. Ids are positional and stable: `r0c0`, `r0c1`, … |
-| `Split(cellId, axis, fraction)` | Replace one cell with two covering exactly the same rectangle |
-| `Merge(cellIds[])` | Replace several cells with one covering their bounding box |
+**One of them builds a layout; two of them edit one. That distinction is load-bearing** and was
+briefly lost — [ADR 0018](../../../../docs/decisions/0018-layout-editing-grid-split-merge.md) decided
+`Grid` constructs, and a later draft of this section gave it an existing template and occupancy,
+which is the grid-as-edit design 0018 explicitly rejected for M1.
+
+| Operation | Kind | Signature |
+|---|---|---|
+| `Grid(columns, rows)` | **Constructor** | `Result<LayoutTemplate>` — a fresh template at `LayoutRevision = 1`. Ids are positional and stable: `r0c0`, `r0c1`, … |
+| `Split(cellId, axis, fraction)` | **Edit** | `Result<LayoutEdit>` — one cell becomes two covering exactly the same rectangle |
+| `Merge(cellIds[])` | **Edit** | `Result<LayoutEdit>` — several cells become one covering their bounding box |
+
+**`Grid` takes no occupancy and produces no remapping, no retired ids and no placements**, because it
+has no prior template to remap *from*. Its output is a new layout, sitting in the library alongside
+the others. Putting it on a monitor is a **layout switch**, not an edit — the existing path in §5's
+table, where the previous layout's addresses stop resolving and their windows become unassigned. That
+is a different operation with a different name and a different consequence, and collapsing the two is
+what produced the contradiction.
+
+Adjusting an *existing* layout into a grid is deliberately not offered in M1
+([ADR 0018](../../../../docs/decisions/0018-layout-editing-grid-split-merge.md)): reconciling an
+arbitrary template against a fresh grid is a much harder identity problem than split or merge, and
+typing a grid is what you do when starting a layout rather than refining one. The recall trigger is
+in that ADR — revisit if refining-into-a-grid turns out to be a real habit.
+
+### 7.0 What an edit returns
 
 The arithmetic is the easy half. The part worth designing is what happens to **cell ids**, because a
 cell id is a permanent contract — occupancy addresses it (§2) and settings reference it. An editor
 that mints fresh ids scatters every stack on every edit, which is how you end up with an editor
 nobody uses.
 
-**But that is also why an edit cannot be a function from `LayoutTemplate` to `LayoutTemplate`.** Each
-operation takes the template *and* the occupancy over it, and returns one transaction
+**And that is why an edit cannot be a function from `LayoutTemplate` to `LayoutTemplate`.** `Split`
+and `Merge` take the template *and* the occupancy over it, and return one transaction
 ([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)) — or a refusal:
 
 ```csharp
@@ -395,7 +415,7 @@ sealed record LayoutEdit(
     ZoneOccupancy Occupancy,                          // already transformed
     IReadOnlyList<PlacementAction> Placements);       // every geometrically affected member
 
-LayoutEdit Grid(LayoutTemplate t, ZoneOccupancy occ, MonitorKey monitor, int columns, int rows);
+Result<LayoutTemplate> Grid(int columns, int rows);                 // constructor — no occupancy
 Result<LayoutEdit> Split(LayoutTemplate t, ZoneOccupancy occ, MonitorKey m, string cellId, Axis a, double f);
 Result<LayoutEdit> Merge(LayoutTemplate t, ZoneOccupancy occ, MonitorKey m, IReadOnlyList<string> cellIds);
 ```
@@ -450,11 +470,12 @@ mutation — but what is saved is the whole transaction, not just the template. 
 3. **Republish** the armed region set against the new geometry, before any placement runs.
 4. **Execute** the `PlacementAction` list, stamping each placed member with the new `GeometryStamp`.
 
-**Step 3 can be refused, and that must not roll back steps 1–2.** Another module may hold an
-overlapping region with the same modifier ([CONDUIT §3.6](../../../../docs/CONDUIT.md#36-pointer-gesture)),
-in which case Conduit refuses the whole set and names the contested rectangles. Refusing the *user's
-layout edit* over that would be absurd — the two have nothing to do with each other — so Zones takes
-the subtraction path the pillar guarantees:
+**Step 3 can be refused, and that must not roll back steps 1–2.** A **higher-priority** module may
+hold an overlapping region with the same modifier
+([CONDUIT §3.6](../../../../docs/CONDUIT.md#36-pointer-gesture)), in which case Conduit refuses the
+whole set and names the contested rectangles. Refusing the *user's layout edit* over that would be
+absurd — the two have nothing to do with each other — so Zones takes the subtraction path the pillar
+guarantees:
 
 > republish → refused with contested rectangles → **republish the same set minus those** (accepted;
 > it adds nothing contested) → if even that is refused, **publish the empty set** (always accepted).
@@ -468,6 +489,27 @@ is the second reason those exist.
 always terminates and there is always a representable state. The alternative — a module stuck holding
 armed regions that describe geometry it no longer has — is the partially-applied edit this section
 exists to prevent, arriving through the back door.
+
+### 7.4 Losing a region Zones already held
+
+Refusal is only half of it. A grant is a **revocable lease**, so a higher-priority module publishing
+over a rectangle Zones holds **takes it**, and Zones is told: a `RegionsRevoked` dispatch naming the
+rectangles, delivered on a worker
+([CONDUIT §3.6](../../../../docs/CONDUIT.md#36-pointer-gesture)). Conduit has already trimmed the
+armed set — Zones does not republish to comply, and must not try.
+
+Zones' handler is deliberately small, and identical in shape to the refusal path:
+
+1. **Mark the affected zones un-cyclable** and leave everything else alone. Occupancy is untouched:
+   losing the wheel gesture over a zone changes nothing about which windows belong in it.
+2. **Say so.** The designer marks those zones, for the same reason a refused activation is surfaced
+   rather than swallowed — a zone that silently ignores the wheel is indistinguishable from a bug.
+3. **Do not retry.** Re-publishing the lost rectangle would be refused, and a module that
+   re-requests on every revocation is a module fighting the user's own priority setting.
+
+**The chord bindings are unaffected**, which is the second time §8.1's decision to make
+`cycle-forward` / `cycle-back` Actions pays for itself: the feature loses its pointer affordance and
+keeps its keyboard one. A revocation degrades Zones; it does not break it.
 
 **A placement may still fail individually** (`Refused`, `PlacedDifferently`), and that is reported
 per member rather than failing the edit. The template change has already been decided by the user;
@@ -610,10 +652,15 @@ Core tests, all runnable on any OS with no desktop:
   stops `Win`+wheel swallowing scroll events over an ordinary window. Plus the refusal path: a
   refused publication leaves the *previous* set active, the subtraction retry is accepted, and the
   empty set is accepted unconditionally — the property §7.3's recovery depends on.
+- **Revocation** — a `RegionsRevoked` dispatch marks exactly the named zones un-cyclable, leaves
+  occupancy untouched, and triggers **no republication**. The last assertion is the one worth writing
+  first: a handler that "helpfully" re-publishes turns one revocation into a loop against the user's
+  own priority setting.
 - **Dispatch by token** — a cycle dispatch carrying a stale region-set version is dropped, and cycling
   never hit-tests the context cursor to find its zone. Written as a test because the tempting
   implementation is the wrong one.
-- **Designer** — `Grid` produces the expected cell count and ids; `Split` preserves the original id on
+- **Designer** — `Grid` produces the expected cell count and ids **and returns a bare template with no
+  occupancy, remap or placements** (the assertion that keeps it a constructor); `Split` preserves the original id on
   the first fragment and its stack; `Merge` refuses every non-tiling subset of a 3×3 grid and accepts
   every tiling one; merged rings concatenate in reading order; a retired id is never reissued.
 - **Edits re-place their windows** — the tests that would have caught the defect
@@ -652,6 +699,7 @@ that ends outside any zone.
 | 7 | **Stack membership does not survive a restart** | Accepted for M1 — window handles do not survive either. Re-associating by process and title is a heuristic that will be wrong silently, which is worse than starting empty |
 | 8 | **An edit that half-applies** — new template, old occupancy, stale armed regions | One `LayoutEdit` transaction applied in one step (§7.3); the `GeometryStamp` catches anything that escapes it ([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)) |
 | 9 | **Another module holds a region Zones needs to arm** | Subtraction retry, then the empty set — never a rollback of the user's layout (§7.3). Cycling degrades on named zones; the chord bindings are unaffected |
+| 10 | **A region Zones already holds is revoked** by a higher-priority module mid-session | Mark those zones un-cyclable, say so, and **do not retry** (§7.4). The lease model means this is a normal event, not a fault |
 
 ---
 

@@ -55,8 +55,8 @@ they change. Conduit stores them. The hook does a rectangle test and nothing els
 
 | Required | This kind |
 |---|---|
-| **Refusal reasons** | `RegionsOverlapAnotherOwner` (another module holds an intersecting region with the same modifier; the refusal **names the contested rectangles**) · `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded) |
-| **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide. **Who wins is decided by explicit user priority, then by stable module id** — never by registration order, which varies with how the host happened to load modules that run ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)) |
+| **Refusal reasons** | `RegionsOverlapAnotherOwner` (a **higher**-priority module holds an intersecting region with the same modifier; the refusal **names the contested rectangles**) · `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded) |
+| **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide. **Who wins is explicit user priority, then stable module id** — never registration order. A grant is a **revocable lease**: a higher-priority claim preempts and the incumbent is told (`RegionsRevoked`); a lower-priority claim is refused ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)) |
 | **Dispatch class** | Hook for the *decision*; the **dispatch runs on a worker**. The hook's entire job is: test, swallow-or-pass, queue |
 | **Guarantee statement** | Delivered as a discrete event carrying the capability id, the **matched zone token**, the **region-set version** it matched under, and a tick delta. **Coalesced** under load, keyed on `(intent, zone token)`. **Not** guaranteed: one dispatch per physical detent, ordering against other input kinds, or delivery at all when the queue is saturated — a dropped cycle tick is a cosmetic loss, and pretending otherwise would mean buffering on the hook path |
 | **Core model with a fake source** | The recognizer is a pure function `(cursor, modifiers, armed regions) -> Swallow \| PassThrough`, driven in tests by a fake input source. Fully testable with no desktop |
@@ -110,7 +110,19 @@ broken.
 - **Arming can be refused; withdrawing cannot.** A module may always publish a subset of what it
   already holds, and the empty set is always accepted. Without that, a refused update can leave a
   module holding regions it has decided are wrong with no safe state to retreat to — and a refusal
-  arriving mid-way through a module's own multi-step change would have no correct resolution.
+  arriving mid-way through a module's own multi-step change would have no correct resolution. It is
+  also what lets Conduit trim a preempted module's set without that trim being refusable.
+- **A grant is a lease, and preemption is real.** *The first version of this contract said priority
+  decides who may arm a rectangle while a lower-priority incumbent keeps whatever it already holds.
+  Those two sentences cannot both be true:* if the incumbent always keeps it, the winner is whoever
+  published first, and the priority order does nothing. So a higher-priority claim **revokes** the
+  overlapping part of a lower-priority lease and the loser is **told** (`RegionsRevoked`, dispatched on
+  a worker). The property that matters is that the resulting armed map is a pure function of the
+  current request set and the priority order — publish order changes which *path* is taken (refuse
+  then retry, or grant then revoke) and never which module ends up holding the rectangle.
+- **A module can therefore lose regions it was using.** That is the cost, and it is why the
+  notification is part of the contract rather than a courtesy: a feature built on armed regions must
+  degrade when they are taken, not assume it keeps them.
 
 ## Alternatives considered
 
