@@ -328,6 +328,11 @@ our control, and individually easy to swallow.
 
 - It will not steal focus as a side effect of placement. Moving a window is not activating it.
 - It will not reorder z-order beyond what the move itself requires.
+
+> **These two are about placement, and they stand.** Raising and activating are available as
+> **explicit, separately-requested operations** (§7.4) — which is the distinction these bullets were
+> always drawing. A caller that asked to move a window has not asked for its focus to change; a
+> caller that asked to raise one has. [ADR 0014](decisions/0014-atlas-explicit-raise-and-activate.md).
 - It will not move a window the user is actively dragging, except as the committed result of an
   explicit gesture ([CONDUIT.md §3.5](CONDUIT.md)).
 - It will not persist anything. Where a window "should" be is a module's settings, not desktop truth.
@@ -354,6 +359,35 @@ stronger than its evidence* in its purest form: the call succeeded, and the wind
 Atlas re-reads the geometry after placing and reports what is actually true. A module that snapped
 three windows and got `PlacedDifferently` for one of them can tell the user something useful; a
 module that got three `true` values cannot.
+
+---
+
+### 7.4 Raise and activate — explicit operations, and the foreground lock
+
+Two operations beyond placement, added for Zones' stack cycling
+([ADR 0014](decisions/0014-atlas-explicit-raise-and-activate.md)) and deliberately kept separate:
+
+| Operation | What it does | Reliability |
+|---|---|---|
+| `Raise(window)` | z-order only — the window comes in front of its overlapping siblings. **Focus is untouched** | Needs no foreground rights. Expected to work |
+| `Activate(window)` | raise, then request foreground | **May be refused by the operating system** |
+
+**The foreground lock is the reason these are two operations and not one.** Windows restricts
+`SetForegroundWindow`: a process that has not recently received input generally cannot take
+foreground, and the call fails quietly or merely flashes a taskbar button. Coordinator activating
+another application's window, in response to input delivered over a third application's window, is
+squarely in the territory that restriction exists to police — and whether it is permitted is not
+knowable from documentation with confidence. It is `Z-4` in
+[manual-validation.md](runbooks/manual-validation.md), and it is the cheapest large unknown in the
+whole project to resolve.
+
+A refusal is `Refused(ForegroundLocked)` — a member of §7.3's set, surfaced like every other. Atlas
+does not retry, does not synthesise input, and does not attach thread input to work around it:
+fighting a deliberate OS protection is how a productivity tool becomes the thing that breaks on a
+Windows update.
+
+**Raise still cannot promise visibility.** Another application's always-on-top window will still
+cover the raised one. Reported honestly rather than retried.
 
 ---
 

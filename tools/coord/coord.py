@@ -722,12 +722,25 @@ def cmd_new_module(args) -> int:
     docs_dir = mod_dir / "docs"
     test_dir = TESTS_DIR / f"Coordinator.{cls}.Core.Tests"
 
-    if mod_dir.exists():
-        die(f"{rel(mod_dir)} already exists — refusing to overwrite an existing module.\n"
+    # A module in this project starts as a DESIGN before it starts as code — docs/MODULE_SPEC.md
+    # says to write the spec first, and Zones was specified in full while the module host that would
+    # load it did not exist. So a directory holding only documentation is not "an existing module"
+    # to be protected from; it is the normal state of a module the day before its first line of C#.
+    #
+    # The thing actually worth refusing is clobbering CODE. Refuse when any project file exists;
+    # otherwise fill in the missing pieces and leave every existing file untouched.
+    existing_projects = sorted(mod_dir.rglob("*.csproj")) if mod_dir.exists() else []
+    if existing_projects:
+        die(f"{rel(mod_dir)} already contains {len(existing_projects)} project file(s) — refusing "
+            "to overwrite an existing module.\n"
+            f"         First: {rel(existing_projects[0])}\n"
             "         If you meant to start over, move or delete it yourself; a scaffold that can\n"
             "         silently clobber work is a scaffold nobody can trust.")
-    if test_dir.exists():
-        die(f"{rel(test_dir)} already exists — refusing to overwrite it.")
+    if test_dir.exists() and any(test_dir.rglob("*.csproj")):
+        die(f"{rel(test_dir)} already contains a project file — refusing to overwrite it.")
+    if mod_dir.exists():
+        info(f"{rel(mod_dir)} exists and holds documentation only — adding the code projects "
+             "around it, leaving every existing file untouched.")
 
     files: dict[Path, str] = {
         mod_dir / "README.md": _module_readme(name, cls, today),
@@ -759,15 +772,27 @@ def cmd_new_module(args) -> int:
             TESTS_CSPROJ.replace("{cls}", cls).replace("{name}", name),
     }
 
+    # Never overwrite a file that is already there. The guard above establishes that no CODE exists;
+    # this establishes that a hand-written README or ARCHITECTURE.md survives contact with the
+    # scaffolder. A generator that silently replaces prose someone wrote is worse than one that
+    # refuses outright, because the loss is invisible until you look for it.
+    skipped = [p for p in files if p.exists()]
+    to_write = {p: c for p, c in files.items() if not p.exists()}
+
     if args.dry_run:
-        print(f"(dry-run) would create {len(files)} file(s) under {rel(mod_dir)} and {rel(test_dir)}:")
-        for path in files:
+        print(f"(dry-run) would create {len(to_write)} file(s) under {rel(mod_dir)} and {rel(test_dir)}:")
+        for path in to_write:
             print(f"          {rel(path)}")
+        for path in skipped:
+            print(f"          (kept, already exists) {rel(path)}")
         return EXIT_OK
 
-    for path, content in files.items():
+    for path, content in to_write.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+    for path in skipped:
+        info(f"kept existing {rel(path)}")
 
     print()
     ok(f"scaffolded module '{name}' ({cls})")

@@ -53,9 +53,10 @@ related:
 
 ## Active & latent debt
 
-Every item below was created by the **2026-08-08 bootstrap pass** ([HISTORY.md](HISTORY.md)). That is
-unusual and worth stating: this is not accumulated cruft, it is the honest cost of authoring a
-structure before there was a toolchain to verify it against. The register starts full on purpose,
+**TD-1 … TD-12** were created by the **2026-08-08 bootstrap pass** ([HISTORY.md](HISTORY.md));
+**TD-13 … TD-14** by the Zones design on the same day. That is unusual and worth stating: this is not
+accumulated cruft, it is the honest cost of authoring a structure — and then a module design —
+before there was a running system to verify either against. The register starts full on purpose,
 because the alternative — a pristine-looking register beside an unverified repository — is exactly
 the false-confidence failure the [evidence standard](OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean)
 exists to prevent.
@@ -76,6 +77,8 @@ exists to prevent.
 | **TD-12** | docs (ADR references) | ⚪ cosmetic | **Many cross-document ADR references are plain text (`ADR 0007`) rather than Markdown links to the file**, a convention adopted during the bootstrap because the ADR filenames were being authored in parallel and a guessed slug would have produced a broken link — which the `doc-link` check treats as an ERROR. The consequence is that the checker cannot verify these references at all: an ADR that is renumbered, retitled or superseded leaves stale plain-text mentions scattered through the docs with nothing to catch them. Genuinely cosmetic today (ten ADRs, all fresh) and genuinely corrosive at fifty. | Convert plain-text ADR references to real Markdown links now that the filenames are fixed, so `doc-link` covers them; or add an `adr-ref` check that resolves `ADR NNNN` text against the decisions directory by number, which is more robust to renaming than a path link. | The first ADR that is superseded or renumbered, **or** whenever the ADR count passes roughly twenty and manual tracking stops being credible. |
 
 ---
+| **TD-13** | modules/zones (stack visibility) | 🟡 latent | **A stack is invisible unless you are dragging.** [ADR 0012](decisions/0012-zones-stacking-model.md) puts several windows at one rectangle with only the front one showing; in M1 the only affordance is the drag overlay drawing each zone's depth. So a zone with three windows in it looks exactly like a zone with one, until you cycle it. Accepted for M1 because the alternative — a per-zone always-on-top tab strip that must follow its zone, survive DPI changes, hide for fullscreen and never steal a click — is a large piece of Windows UI to build before daily use has shown whether stacking earns its place at all. | Build the tab strip as its own milestone (parked in [vision.md](vision.md)), or find a cheaper affordance — a badge, a brief flash on cycle, a tray readout of the zone under the cursor. | Stacking is in daily use **and** invisibility is the top complaint about it. |
+| **TD-14** | modules/zones (stack persistence) | 🟡 latent | **Stack membership does not survive a restart.** Layouts persist; which windows were stacked together does not, because `WindowRef` does not survive a restart either ([ADR 0012](decisions/0012-zones-stacking-model.md) §4). Re-associating by process path and window title was considered and rejected: titles change while an application runs, several instances of one process are indistinguishable, and a partial restore is more confusing than none — the failure is silent and reads as flakiness. | Revisit only with a concrete re-association rule that fails **loudly** when it cannot match. Anything that guesses quietly is worse than starting empty. | Daily use shows stacks are rebuilt often enough to be a chore. |
 
 ## Paid
 

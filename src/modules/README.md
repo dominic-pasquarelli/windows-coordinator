@@ -31,7 +31,7 @@ has not earned. The scope discipline behind that is
 
 | Module | What it will do | State |
 |---|---|---|
-| **Zones** (M1) | Window management in the FancyZones idiom: layout templates, per-monitor zone sets, drag-to-snap. The first real consumer of **both** pillars, and the first outside consumer of the module contract. | **PLANNED — no code, no directory** |
+| **Zones** (M1) | Window layouts **with stacks** — a zone holds several windows and `Win`+wheel cycles them, which is the part FancyZones does not do. **Fully designed, no code:** [zones/README.md](zones/README.md) and its [ARCHITECTURE.md](zones/docs/ARCHITECTURE.md); decisions in ADR 0012–0014. The first real consumer of both pillars, and it needs one extension from each. |
 | **Chrono** (M2) | Timers, pomodoro, reminders. The first consumer of scheduled triggers and of the notification path — and, more usefully, the *second independent* consumer of the module contract, which is the only thing that actually tests a contract. | **PLANNED — no code, no directory** |
 | Launcher · Clipboard · PinTop · Palette · Focus · Restore | Ideas, parked. | **NOT PLANNED** — they live in [docs/vision.md](../../docs/vision.md) and nowhere else |
 

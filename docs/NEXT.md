@@ -81,8 +81,10 @@ project on every push, and the Linux job runs the Core suites. So the honest sta
 are resuming and the run was green, say so with the date; if it was red, the errors are the work.
 
 **What does not exist — and this is the part that matters now that it compiles.** There is **no
-module.** Zones and Chrono are roadmap entries with a directory-level plan and nothing more —
-deliberately not scaffolded, because an empty directory is a claim. There is **no Shell adapter**, so
+module code.** Zones (M1) is now **fully designed** —
+[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0014
+settle its three non-obvious decisions — but not one line of it is written, and its code projects are
+deliberately not scaffolded. Chrono (M2) is still a roadmap entry only. There is **no Shell adapter**, so
 not one line of Windows-facing code exists in this repository. There is **no solution file** (`.sln`
 files carry GUIDs that cannot be verified in a container; generating it is step 2 below).
 **Nothing has ever run on Windows.** No hotkey has been registered, no monitor enumerated, no window
@@ -103,8 +105,10 @@ moved, no tray icon shown. A green build and 45 green tests move none of that �
    working check — but it is defeated by reflection or a fully-qualified type name, so a green
    boundary result is evidence, not proof (**TD-3** in [TECH_DEBT.md](TECH_DEBT.md)).
 3. **Do not scaffold anything to make the tree look finished.** The scope discipline in
-   [COORDINATOR.md §9](COORDINATOR.md#9-scope-discipline) is load-bearing: no speculative module
-   directories, no stub pillar, no third pillar. The parked ideas live in [vision.md](vision.md) and
+   [COORDINATOR.md §9](COORDINATOR.md#9-scope-discipline) is load-bearing: no stub pillar, no third
+   pillar, no module code before its host exists. `src/modules/zones/` is **documentation only** and
+   that is the point — a module here starts as a design, and `coord new-module zones` fills the code
+   in around those docs when P1 and P2 close. The parked ideas live in [vision.md](vision.md) and
    nowhere else.
 
 ---
@@ -241,21 +245,38 @@ DPI is closed by the runbook or it is not closed.
 
 ### P3 — Zones (M1)
 
-The first real module and the first outside consumer of both pillars. **Layout math first, placement
-second** — the ordering is deliberate: the math is pure and host-testable, so proving it before any
-window moves means that when placement misbehaves you already know the geometry is not the cause.
+The first real module and the first outside consumer of both pillars. **Fully designed** — read
+[src/modules/zones/docs/ARCHITECTURE.md](../src/modules/zones/docs/ARCHITECTURE.md) before writing a
+line, and note that Zones needs one extension from each pillar (ADR 0013, ADR 0014) which are
+specified but unbuilt.
 
-1. Layout templates and per-monitor zone sets as pure Core types, host-tested against a table of
-   work areas, templates and mixed DPI.
-2. Settings shape for zone sets, with its migration path, before any UI.
-3. Drag-to-snap through Conduit intents and Atlas snapshots — no raw hooks, no direct enumeration.
-   The boundary check enforces this mechanically.
-4. Shelve it properly before moving on: the shelving contract in
+**Pure logic first, placement second, Windows last** — the ordering is deliberate: the interesting
+parts are pure and host-testable, so proving them before any window moves means that when placement
+misbehaves you already know the model is not the cause.
+
+1. **The occupancy model** — assign, cycle, and `Reconcile`, with the three invariants written as
+   failing tests first. This is the whole module; everything below is plumbing around it.
+2. **Armed-region computation**, with the test that a zone leaves the armed set the moment its depth
+   drops below two — the test that stops `Win`+wheel swallowing scroll over ordinary windows.
+3. **Settings shape** and its migration path, before any UI.
+4. **The Atlas raise path** (ADR 0014) and manual-validation `Z-4` — *do this early*. The foreground
+   lock is the module's largest unknown and among the cheapest to resolve; the design already
+   defaults to raise-without-activate, so a bad answer costs a setting rather than a redesign.
+5. **The pointer-gesture kind in Conduit** (ADR 0013), with its recognizer host-tested against a fake
+   input source, then `Z-3` and `Z-5` on a real desktop.
+6. **Drag-to-snap and the overlay** — the module's only Windows code.
+7. Shelve it properly before moving on:
    [MODULE_SPEC.md §7](MODULE_SPEC.md#7-the-shelving-contract).
 
-**Closes when:** the math is host-tested as above; drag-to-snap is validated by hand on a real
-multi-monitor desktop and **recorded in the manual-validation runbook**; the module satisfies the
-shelving contract.
+**Closes when:** the occupancy model and reconciliation are host-tested; `Z-1`…`Z-6` are performed on
+a real multi-monitor desktop and **recorded**; the module satisfies the shelving contract.
+
+> **Deliberately not in M1:** the stack tab strip. Stacks are invisible in M1 except during a drag,
+> which is a real cost accepted on purpose — the strip is a per-zone always-on-top overlay that must
+> follow its zone, survive DPI changes, hide for fullscreen and never steal a click, and it is not
+> worth building before daily use has shown whether stacking earns its place at all. **Recall hook:**
+> if stacking is used daily and the invisibility is the top complaint, the strip becomes its own
+> milestone. Parked in [vision.md](vision.md).
 
 ### P4 — Chrono (M2)
 

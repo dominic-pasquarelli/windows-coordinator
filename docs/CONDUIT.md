@@ -120,7 +120,7 @@ only way to keep the blast radius bounded.
 
 ## 3. The trigger-intent taxonomy
 
-Five kinds. Each row below is a *contract*: what the intent carries when a module declares it, and
+Six kinds. Each row below is a *contract*: what the intent carries when a module declares it, and
 what Conduit guarantees when it fires. The guarantees are deliberately modest — an honest weak
 guarantee a module can rely on beats a strong one that quietly does not hold.
 
@@ -131,6 +131,7 @@ guarantee a module can rely on beats a strong one that quietly does not hold.
 | **Schedule** | capability id · a fixed interval, a wall-clock time, or a one-shot instant · a drift policy · a missed-fire policy | fires on a dispatch worker, never a hook thread; **not** real-time — no latency bound; behavior across machine sleep and across a civil-time discontinuity is defined, not incidental |
 | **Tray / menu action** | capability id · a label · optional enabled/checked state | invoked on the UI thread; always attributed to the declaring module by name; lives in the **one** host-owned tray menu |
 | **Input gesture** | capability id · a recognizer spec (e.g. *window drag in progress* + *modifier held*) | delivered as a **recognized gesture**, never raw input; updates are throttled and coalesced; **`Ended` is always delivered if `Started` was** — including on cancel |
+| **Pointer gesture** | capability id · a modifier requirement · a wheel axis · an **armed region set** the module pre-resolves and republishes | a **discrete** event carrying the capability id, cursor position and tick delta; coalesced under load; **explicitly not** one dispatch per physical detent, not ordered against other input kinds, and not guaranteed at all when saturated |
 
 The rest of this section says what each one is actually for and where its sharp edges are.
 
@@ -232,6 +233,39 @@ drag ending outside any target, focus loss, session lock, or the recognizer bein
 `Cancelled` end rather than leaving the module hanging. This is the same reasoning as §3.2's paired
 move/size events, and it is worth restating because it is the guarantee a gesture consumer will
 build its cleanup on.
+
+### 3.6 Pointer gesture
+
+The motivating case is Zones' stack cycling: *the wheel moved, with a modifier held, over one of
+these rectangles.* It is not §3.5 — that kind is a **span** whose guarantees exist so an overlay put
+up at `Started` is always taken down, and a wheel tick is **discrete**, with nothing to clean up.
+Forcing it into a span would mean synthesising lifecycle events with no referent. Full reasoning and
+the §7 checklist: [ADR 0013](decisions/0013-the-pointer-gesture-trigger-kind.md).
+
+**The rule that makes this kind safe, and the reason it is written here rather than in a module:**
+
+> **A pointer-gesture recognizer must be answerable from data Conduit already holds.** The decision
+> to swallow or pass through happens on the hook thread, on every wheel event the machine
+> processes — including the one scrolling this page. Asking a module would put arbitrary code on the
+> critical path of every scroll on the desktop, which is the failure this pillar exists to prevent.
+
+So a module supplies **pre-resolved rectangles** in
+[`PhysicalVirtualScreen`](ATLAS.md#51-the-spaces) space and republishes them when they change. The
+hook does an early-out on the modifier, then a bounded rectangle test, then swallow-or-pass. The
+dispatch runs on a worker; the hook's whole job is *test, decide, queue*.
+
+**Conflicts are geometric, not modifier-wide.** Two intents collide only when their modifier matches
+**and** their regions intersect — two modules arming disjoint regions with the same modifier is the
+normal case, not a conflict. Refusals: `RegionsOverlapAnotherOwner`, `ModifierReserved`,
+`TooManyRegions`.
+
+**Fail open, always.** Empty region set, unknown modifier state, saturated queue — pass the event
+through untouched. A dropped cycle tick is cosmetic; a swallowed scroll is a desktop that feels
+broken, and the user cannot tell which component did it.
+
+**Staleness is bounded by the topology generation.** An armed region set carries the Atlas generation
+it was computed at, so Conduit can drop a provably-stale set rather than acting on rectangles that
+no longer describe any monitor.
 
 ---
 

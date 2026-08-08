@@ -422,6 +422,81 @@ not just the bug — it is a settings backup written immediately before any migr
 
 ---
 
+## 4.1 Zones scenarios (M1) — written ahead of the module, on purpose
+
+These six are written before Zones exists so the module has a target rather than a retrospective.
+Each names the thing no test can reach. Design:
+[src/modules/zones/docs/ARCHITECTURE.md](../../src/modules/zones/docs/ARCHITECTURE.md).
+
+### Z-1 — snap into a zone, on the monitor you meant
+
+**Proves:** drag-to-snap places a window in the zone the cursor was over, on the right monitor, with
+the right geometry — the basic claim of the module.
+
+1. Two monitors, a layout with at least three zones on each.
+2. Drag a window into a zone on the **secondary** monitor, snap modifier held. **Expect:** it fills
+   the zone; the overlay disappears on release.
+3. Repeat onto the primary. **Expect:** same.
+4. Compare the window's *visible* edges to the zone edges. **Expect:** flush — no one-pixel gap, no
+   overhang. A hairline of wallpaper means the invisible-border compensation is wrong, not the math.
+
+### Z-2 — a stack forms, and cycling walks it
+
+**Proves:** the headline feature, end to end.
+
+1. Drop three windows onto the same zone. **Expect:** each lands in front; the previous one is behind
+   it, not minimised — check the taskbar still shows all three.
+2. `Win` + wheel over that zone. **Expect:** the next window comes to the front, one per detent.
+3. Keep going. **Expect:** it cycles round; no window is skipped or lost.
+4. Wheel the other way. **Expect:** the reverse order exactly.
+
+### Z-3 — the wheel hook does not slow the desktop down
+
+**Proves:** the hook budget under real load — the risk that Zones makes every scroll on the machine
+slightly worse.
+
+1. With a stack armed, scroll normally in a browser, an editor, and a file list — **without** the
+   modifier. **Expect:** indistinguishable from Coordinator not running. Any perceptible stutter is a
+   finding, and a serious one.
+2. Repeat while the machine is busy (a build running). **Expect:** the same.
+3. Record the measured hook latency if instrumentation exists; otherwise record the subjective
+   verdict and say that is what it is.
+
+### Z-4 — the foreground lock ⚠ **run this first**
+
+**Proves:** whether `Activate` is permitted at all — the module's largest unknown
+([ADR 0014](../decisions/0014-atlas-explicit-raise-and-activate.md)).
+
+1. `zones.activate-on-cycle` **off**. Cycle a stack. **Expect:** the window comes to the front and
+   keyboard focus does **not** move — type, and the characters go where they went before.
+2. Turn it **on**. Cycle again. **Expect:** either focus moves, **or** a surfaced
+   `Refused(ForegroundLocked)`. **A silent no-op is a defect** — the whole point of the refusal is
+   that it is visible.
+3. Record which happened, on which Windows build. This single observation decides whether the setting
+   is worth keeping.
+
+### Z-5 — swallowing does not break scrolling
+
+**Proves:** the fail-open rule, which is what stops the module making the desktop worse.
+
+1. Over a **stacked** zone: `Win`+wheel cycles, and a bare wheel scrolls the front window normally.
+2. Over an **unstacked** window: `Win`+wheel does **nothing** and does not swallow the event —
+   confirm by checking the window did not scroll either.
+3. Remove windows until the stack has one left. **Expect:** the zone disarms — `Win`+wheel over it
+   now behaves exactly as in step 2.
+
+### Z-6 — the overlay always comes down
+
+**Proves:** the paired `MoveSizeStart`/`MoveSizeEnd` guarantee, whose failure mode is an overlay
+stuck on the user's screen.
+
+1. Start a drag with the modifier, then press **Escape**. **Expect:** overlay gone, window unmoved.
+2. Start a drag, release outside any zone. **Expect:** overlay gone, window left where dropped.
+3. Start a drag and **lock the session** mid-drag (Win+L), then unlock. **Expect:** no overlay.
+4. Start a drag and unplug a monitor mid-drag. **Expect:** no overlay; no crash.
+
+---
+
 ## 5. The per-release checklist
 
 Run before anything is delivered to a machine — including the owner's second machine, which is the
@@ -450,6 +525,7 @@ trip-wire that makes the delivery channel urgent ([NEXT.md](../NEXT.md)).
 | Anything that enumerates or observes the desktop | **S3**, plus **S4** |
 | Any settings-schema change | **S6** in full, including step 6 |
 | A new module | every scenario that module's docs name, plus **S1** and **S6** |
+| Anything in Zones | **Z-1**…**Z-6**; `Z-4` before any other Zones work |
 
 **A release with an unrun applicable scenario is not blocked — it is *recorded as such*.** Write down
 which scenarios were skipped and why. That is the never-force rule ([OPERATING_MODEL §2](../OPERATING_MODEL.md))

@@ -120,5 +120,49 @@ class ScaffoldTests(unittest.TestCase):
                                     f"new-module accepted the invalid name {bad!r}")
 
 
+
+class DesignFirstScaffoldTests(unittest.TestCase):
+    """A module starts as a design before it starts as code.
+
+    docs/MODULE_SPEC.md says to write the spec first, and Zones was specified in full before the
+    module host that would load it existed. So `coord new-module` has to be able to fill in the code
+    around a directory that already holds documentation — while never touching a file a human wrote,
+    and while still refusing to clobber real code.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name) / "repo"
+        _copy_repo(self.repo)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_fills_in_code_around_a_docs_only_module_without_touching_the_docs(self) -> None:
+        mod = self.repo / "src" / "modules" / "designfirst"
+        (mod / "docs").mkdir(parents=True)
+        readme = mod / "README.md"
+        arch = mod / "docs" / "ARCHITECTURE.md"
+        readme.write_text("hand-written front door\n", encoding="utf-8")
+        arch.write_text("hand-written design\n", encoding="utf-8")
+
+        result = _run_new_module(self.repo, "designfirst")
+        self.assertEqual(result.returncode, 0,
+                         f"refused a docs-only module\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+
+        # The code arrived...
+        self.assertTrue((mod / "Coordinator.Designfirst.Core"
+                             / "Coordinator.Designfirst.Core.csproj").exists())
+        # ...and the prose is byte-for-byte what it was.
+        self.assertEqual(readme.read_text(encoding="utf-8"), "hand-written front door\n")
+        self.assertEqual(arch.read_text(encoding="utf-8"), "hand-written design\n")
+
+    def test_still_refuses_when_real_code_exists(self) -> None:
+        """The guard that actually matters must not have been weakened into uselessness."""
+        first = _run_new_module(self.repo, "hascode")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = _run_new_module(self.repo, "hascode")
+        self.assertNotEqual(second.returncode, 0,
+                            "scaffolded over a module that already had project files")
+        self.assertIn("project file", (second.stdout + second.stderr).lower())
+
 if __name__ == "__main__":
     unittest.main()
