@@ -197,9 +197,13 @@ different reasons:
   live. If a foreground-change notification is ever missed, a heartbeat that reissues the previous
   value advances the sequence forever over stale content. Re-reading the foreground bounds that: a
   missed publication is repaired within one interval, and Atlas **counts** each repair, because
-  self-healing with no trace hides a broken event path. A publication is only counted as a repair when
-  **no event reported the change** — coalesced requests are attributed event-driven if any of them
-  was, so a heartbeat overlapping a real event does not log a repair that never happened.
+  self-healing with no trace hides a broken event path. **An event request names the foreground it was
+  notified about**, and a publication is counted as a heartbeat correction when the sampled foreground
+  **was named by no request in the batch** — precise enough to still count a missed change to Y while
+  an event was reporting X, which a coarser "was any request event-driven?" rule would suppress. It
+  can over-count under rapid switching (a notification still in flight), which is the safe direction
+  for a health signal and the reason it is read as a rate
+  ([ADR 0022](decisions/0022-one-publication-sequencer-for-desktop-facts.md)).
 
 **Only the foreground is re-sampled, and the asymmetry is the argument.** Reading it is one call;
 enumerating monitors is what a snapshot is for. More importantly, a consumer *can* detect a missed

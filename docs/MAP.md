@@ -87,7 +87,7 @@ related:
 
 ## Decisions (ADRs)
 
-The unified decision log (23 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
+The unified decision log (24 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
 
 - [ADR 0001 — Adopt the Axon documentation and operating protocols](decisions/0001-adopt-the-axon-documentation-and-operating-protocols.md)
 - [ADR 0002 — C# / .NET 9 and WinUI 3 as the stack](decisions/0002-csharp-dotnet9-and-winui3-as-the-stack.md)
@@ -112,3 +112,4 @@ The unified decision log (23 ADRs) — [docs/decisions/](decisions/). Splitting 
 - [ADR 0021 — A module states a standing request; Conduit computes the grants and keeps recomputing them](decisions/0021-requested-versus-granted-regions.md)
 - [ADR 0022 — Sampling, sequencing and swapping are one ordered operation](decisions/0022-one-publication-sequencer-for-desktop-facts.md)
 - [ADR 0023 — Conduit has two dispatch classes, and the control plane may not drop the final state](decisions/0023-the-control-plane-carries-state-not-deltas.md)
+- [ADR 0024 — `GrantVersion` is the only version, and it stamps everything](decisions/0024-grantversion-is-the-single-authoritative-version.md)

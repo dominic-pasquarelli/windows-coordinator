@@ -21,6 +21,7 @@ related:
   - docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md
   - docs/decisions/0021-requested-versus-granted-regions.md
   - docs/decisions/0023-the-control-plane-carries-state-not-deltas.md
+  - docs/decisions/0024-grantversion-is-the-single-authoritative-version.md
   - docs/runbooks/manual-validation.md
 ---
 
@@ -164,11 +165,30 @@ So the decision must be answerable **without asking Zones anything**:
 > and queue a dispatch. Anything else → pass through, untouched, immediately.
 
 **The dispatch names the zone; it does not describe the pointer.** What arrives is the **zone token**
-that matched and the **region-set version** it matched under. Zones checks the version is current and
-drops the event if it is not — otherwise a layout change between the wheel tick and the dispatch
-cycles a different zone than the one under the user's cursor. The cursor position is on the
-invocation context and is for positioning and diagnostics only; **re-deriving the zone by hit-testing
-it would reintroduce exactly the staleness the token removes**
+that matched and the **`GrantVersion`** it matched under:
+
+```csharp
+// SKETCH — illustrative, not compiled.
+void OnPointerGesture(ZoneToken token, int grantVersion, int delta)
+{
+    if (grantVersion != _appliedGrantVersion) return;   // EXACT match, or drop
+    Cycle(token, delta);
+}
+```
+
+**Exact equality, not "still current".** An older version means the tick was recognized under a lease
+epoch that has since been replaced — and because arbitration can revoke *and then restore* a region
+without Zones publishing anything, a naive "does my requested set still match?" check passes right
+through a preempt-and-restore and executes against the wrong epoch. A *newer* version means Conduit
+has swapped the hook table but Zones has not yet applied that grant, so `_cyclableZones` and the event
+disagree. Both drop ([ADR 0024](../../../../docs/decisions/0024-grantversion-is-the-single-authoritative-version.md)).
+
+Losing a tick in the narrow window around an arbitration change is acceptable and consistent with what
+the kind promises: delivery was never guaranteed, and a dropped cycle tick is cosmetic where a tick
+applied to the wrong epoch is not.
+
+The cursor position is on the invocation context and is for positioning and diagnostics only;
+**re-deriving the zone by hit-testing it would reintroduce exactly the staleness the token removes**
 ([CONDUIT §3.6](../../../../docs/CONDUIT.md#36-pointer-gesture)).
 
 **And a region can be granted only in part, or taken later** — a higher-priority module may request
@@ -503,11 +523,21 @@ through any of this; only the grant does, so there is nothing to re-publish and 
 
 ```csharp
 // SKETCH — illustrative, not compiled.
-void OnGrantChanged(ArmedRegionSet granted, int grantVersion)
+
+// The ONE place grant state changes. Both the Publish result and every GrantChanged come here.
+void ApplyGrant(ArmedRegionSet granted, int grantVersion)
 {
     if (grantVersion <= _appliedGrantVersion) return;   // already past this
     _appliedGrantVersion = grantVersion;
     _cyclableZones = ZonesCoveredBy(granted);           // adopt, do not diff
+}
+
+void OnGrantChanged(ArmedRegionSet granted, int v) => ApplyGrant(granted, v);
+
+void RepublishArmedRegions(ArmedRegionSet requested)
+{
+    var (granted, version) = _conduit.Publish(requested);
+    ApplyGrant(granted, version);                       // NOT a separate path
 }
 ```
 
@@ -515,6 +545,13 @@ void OnGrantChanged(ArmedRegionSet granted, int grantVersion)
 delivered before it — a message coalesced away, or one arriving late, cannot leave Zones out of step,
 because every message states the whole truth. The version guard makes it independent of a delivery
 guarantee Zones cannot verify.
+
+**And the publication result goes through the same door.** `Publish` returns `(Granted, GrantVersion)`
+and Zones feeds it to `ApplyGrant` rather than assigning `_cyclableZones` directly
+([ADR 0024](../../../../docs/decisions/0024-grantversion-is-the-single-authoritative-version.md)). A
+second, unguarded assignment would let an in-flight result for grant v1 land *after* a `GrantChanged`
+for v2 and overwrite it — Zones would then be cycling against a grant that had already been
+superseded, with nothing to notice. One guarded path is smaller than two paths carefully ordered.
 
 Everything else follows from `_cyclableZones`:
 
@@ -684,9 +721,17 @@ Core tests, all runnable on any OS with no desktop:
   (which is what lets Conduit coalesce), and a message whose `GrantVersion` is **not newer** must be
   ignored. A suite testing only the revoke direction passes on the half-implementation whose failure
   is a feature that never comes back.
-- **Dispatch by token** — a cycle dispatch carrying a stale region-set version is dropped, and cycling
-  never hit-tests the context cursor to find its zone. Written as a test because the tempting
-  implementation is the wrong one.
+- **Dispatch by token and `GrantVersion`** — cycling never hit-tests the context cursor to find its
+  zone, and a dispatch whose `GrantVersion` is not **exactly** the applied one is dropped. Two
+  sequences matter, and both pass under the version the design replaced:
+  - **preempt-and-restore**: recognize a tick at grant v1, preempt to v2, restore to v3, deliver the
+    v1 tick — dropped. A guard on the *requested*-set version lets it through, because that version
+    never moved.
+  - **too new**: deliver a tick stamped v2 before `ApplyGrant(v2)` has run — dropped, because
+    `_cyclableZones` is still v1's.
+- **One `ApplyGrant` path** — hold a `Publish` result for v1, apply `GrantChanged` v2, then deliver the
+  v1 result: it must **not** overwrite v2. A build that assigns the publication result directly must
+  fail this.
 - **Designer** — `Grid` produces the expected cell count and ids **and returns a bare template with no
   occupancy, remap or placements** (the assertion that keeps it a constructor); `Split` preserves the original id on
   the first fragment and its stack; `Merge` refuses every non-tiling subset of a 3×3 grid and accepts

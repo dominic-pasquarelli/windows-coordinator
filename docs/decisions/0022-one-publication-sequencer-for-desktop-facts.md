@@ -61,17 +61,30 @@ something that matters.
 unchanged: one atomic load, no coordination, no waiting. Publication ordering is a producer-side
 concern and stays entirely on the producer side.
 
-### Pending requests coalesce, and attribution survives the coalescing
+### Pending requests coalesce, and the repair metric needs identity to survive it
 
 Because the sequencer samples at execution time rather than at request time, N pending requests
 collapse to **one** sample and one publication — the later requests would have sampled the same
 world. Coalescing is therefore free rather than lossy.
 
-**A coalesced publication is attributed event-driven if any of its requests was.** The repair counter
-([ADR 0017](0017-invocation-context-and-one-drag-lifecycle.md)) counts only publications where the
-heartbeat found a foreground **no event had reported**. Without this rule a heartbeat coalesced with a
-genuine event would record a repair that never happened — a false alarm in a counter whose entire
-purpose is to make a broken event path visible.
+**An event request names the foreground it was notified about.** It still carries no sample *to
+publish* — the sequencer does all the sampling — but `EVENT_SYSTEM_FOREGROUND` names a window, so the
+event path can state which foreground it is reporting. The repair counter
+([ADR 0017](0017-invocation-context-and-one-drag-lifecycle.md)) then counts a **heartbeat correction**
+when the sequencer's sampled foreground **was named by no request in the batch**.
+
+*The first version of this ADR said only "attributed event-driven if any request was", and that cannot
+support the guarantee it was written for:* if the event path reports a change to X while a *different*
+change to Y was missed, a batch containing the X event suppresses the count and the Y repair goes
+unrecorded — under-reporting exactly when the event path is **partly** working, which is the failure
+worth catching. Identity makes the question answerable: *was the value we ended up publishing one that
+an event actually told us about?*
+
+**The residual imprecision is stated, not hidden.** Under rapid switching the sequencer can sample a
+foreground whose notification is still in flight, and count a correction the event path was about to
+report. That is an **over**-count — the safe direction for a health signal, since it prompts a look
+rather than concealing a fault — and it is why the metric is read as a **rate over time** rather than
+as an exact tally of dropped notifications.
 
 ## Consequences
 

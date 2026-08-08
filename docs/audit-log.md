@@ -26,6 +26,81 @@ related:
 
 ---
 
+## 2026-08-08 — PR #2 round 8: two versions doing one job, and a metric that could not measure itself
+
+**Scope:** the pointer-gesture payload's version contract and the `DesktopFacts` repair metric,
+re-read against a review that accepted round 7's two fixes and found a contract mismatch the new
+arbitration model had opened underneath them.
+
+**Mechanical result:** `coord audit` 0/0/0 · `coord audit --since origin/main` 0/0/0 ·
+`coord map --check` clean · 11 scaffold tests green. **No C# changed.** Nothing has run on Windows.
+
+### The blocker
+
+[ADR 0013](decisions/0013-the-pointer-gesture-trigger-kind.md) stamped a dispatch with the **region-set
+version** — correct when written, because the set a module published *was* the set the hook tested.
+[ADR 0021](decisions/0021-requested-versus-granted-regions.md) split that into **requested** and
+**granted**, and nobody went back to the payload. The two versions stopped being interchangeable: a
+module's requested-set version sits unchanged while `GrantVersion` moves through lease epochs, because
+arbitration changes without the module publishing anything.
+
+Which admits: recognize a tick at grant v1 · preempt to v2 · restore to v3 · deliver the v1 tick · its
+requested-set version still matches · it executes against an epoch replaced twice. **The guard was
+checking the one value that had not changed.**
+
+[ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md) makes `GrantVersion` the
+only version, stamped into the hook lookup table, every dispatch, the publication result and every
+`GrantChanged`, with **exact-equality** execution. The same review found the second instance of the
+same root cause: the publication result had no version and no guard, so an in-flight result for v1
+could land after a `GrantChanged` v2 and overwrite it. Both now go through one `ApplyGrant`.
+
+### The pattern — a refactor that left a contract behind
+
+New shape, and the most self-inflicted of the eight rounds. Rounds 4–7 were defects *within* a
+decision. This one was created **by an earlier fix**: ADR 0021 was correct, and it silently invalidated
+a contract written three ADRs earlier that nothing linked it to. The payload and the arbitration model
+were edited in different sittings, and neither edit had a reason to look at the other.
+
+**The generalisable check: when a model splits one concept into two, grep for every consumer of the
+old one.** "Region-set version" survived as a phrase because it still parsed — it named a real value,
+just no longer the right one. A rename would have caught this; a split did not, because both halves
+kept plausible names.
+
+This is why the count of correction notes on ADR 0013 is now four. That is not noise: an ADR that
+keeps getting corrected is an ADR whose consumers keep changing, and the log is doing its job.
+
+### The smaller finding, which is about honest metrics
+
+Round 7 attributed a coalesced publication as event-driven "if any request was event-driven". That
+cannot support the guarantee it was written for: if the event path reports a change to X while a
+*different* change to Y was missed, a batch containing the X event suppresses the count — the metric
+under-reports **exactly when the event path is partly working**, which is the interesting failure.
+
+Fixed by carrying identity: an event request names the foreground it was notified about, and a
+correction is counted when the sampled foreground was named by **no** request in the batch. And the
+residual is now stated rather than implied — under rapid switching this can over-count a notification
+still in flight, which is the safe direction for a health signal and the reason it is read as a rate
+rather than a tally.
+
+**Worth keeping: a metric needs its precision stated, not just its intent.** "Counts missed
+notifications" sounded exact and was not; "counts publications whose value no request named, read as a
+rate" is weaker and true.
+
+### Guards
+
+Both new failure modes get their sequence written out in
+[CONDUIT §5.4](CONDUIT.md#54-proving-the-guard-not-asserting-it), each specified to go red against the
+design it replaced: **v1 → preempt v2 → restore v3 → deliver v1** must drop (a requested-set guard lets
+it through), and **hold a v1 publication result, apply v2, deliver v1** must not overwrite (a separate
+unguarded result path lets it through).
+
+### Still owed
+
+- P1 and P2 before any Zones code. `Z-1`…`Z-6` remain written and never executed.
+- Eight rounds. The specification is materially better; the implementation has not started.
+
+---
+
 ## 2026-08-08 — PR #2 round 7: two concurrency contracts that atomicity did not provide
 
 **Scope:** the `DesktopFacts` publication path and the grant-notification delivery path, re-read

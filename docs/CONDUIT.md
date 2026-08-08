@@ -399,6 +399,25 @@ depth is effectively one and the survivor is always the most complete.
   **recovery**: a handler that faulted, or a module re-initialising, resynchronizes in one call rather
   than waiting for an arbitration change that may never come. Not for routine gap-filling.
 
+#### One path in, and the publication result uses it
+
+```csharp
+// SKETCH — illustrative, not compiled.
+(ArmedRegionSet Granted, int GrantVersion) Publish(ArmedRegionSet requested);
+
+void ApplyGrant(ArmedRegionSet granted, int version);   // the ONLY way grant state changes
+```
+
+**`Publish` returns a versioned grant, and that result goes through the same `ApplyGrant` as every
+`GrantChanged`** ([ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md)). There
+is deliberately no separate publication-result path.
+
+*This is not symmetry for its own sake.* An unversioned result is a second writer to the same state
+with no guard, so an in-flight result for grant v1 can land **after** a `GrantChanged` for v2 and
+overwrite it — leaving the module acting on a grant that has already been superseded, with nothing to
+detect it. Two paths mutating one state where only one is guarded is the bug; one guarded path is the
+fix, and it is smaller than guarding the second path carefully.
+
 **The version bump on *restoration* is as load-bearing as the one on revocation:** a gesture recognized
 under the old lease and still queued must not execute against an arbitration state that has since
 changed, and "changed back" is still changed.
@@ -438,10 +457,28 @@ to work around contention being a refusal.* The consumer's side is
 
 #### The queued event carries a token, not coordinates
 
-A dispatch carries the **opaque zone token** that matched and the **region-set version** it matched
-under. On delivery the module checks the version is still current and drops the event if it is not.
-Without this, a layout change between recognition and dispatch cycles *a different zone than the one
-the user pointed at*, which is both wrong and untraceable.
+A dispatch carries the **opaque zone token** that matched and the **`GrantVersion`** it matched under.
+On delivery the module executes only when that version **exactly equals** the grant version it has
+applied, and drops the event otherwise. Without this, a change between recognition and dispatch cycles
+*a different zone than the one the user pointed at*, which is both wrong and untraceable.
+
+**The version is `GrantVersion` and nothing else** ([ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md)).
+*An earlier draft stamped the module's **requested**-set version, which was the same value back when a
+module's published set was the set the hook tested. Once §3.6.1 split requested from granted, they
+stopped being interchangeable — a requested-set version sits unchanged while `GrantVersion` moves
+through lease epochs, because arbitration changes without the module publishing anything.* That let a
+tick recognized at grant v1 survive a preempt (v2) and a restore (v3) and still pass its guard, because
+the guard was checking the one value that had not changed.
+
+**Exact equality, not `>=`.** An *older* version means the event was recognized under a lease epoch
+that has been replaced. A *newer* one means Conduit has swapped the hook table but the module has not
+yet applied that grant — so acting would mean acting on a state the module has not adopted. Both drop.
+This can lose a tick in the narrow window around an arbitration change, which is consistent with what
+this kind guarantees: delivery was never promised, and a dropped cycle tick is cosmetic where a tick
+executed against the wrong epoch is not.
+
+The **zone token stays**, because it answers *which zone* and `GrantVersion` does not. The two answer
+different questions.
 
 **The cursor position is still present — as context, never as an address.** §5.5's
 `InvocationContext` carries the cursor captured at recognition (a `Hook` origin reads it from the
@@ -648,6 +685,16 @@ advance so it does not get negotiated later:
   **restored** grant and never afterwards applies the revoked one. Then assert the same holds when the
   two updates coalesce — the survivor must be the newer, complete state. A version-ignoring consumer
   must fail this test.
+- **The `GrantVersion` guard (§3.6, §3.6.1) gets the two sequences it exists for**, both of which pass
+  under the design [ADR 0024](decisions/0024-grantversion-is-the-single-authoritative-version.md)
+  replaced:
+  1. **Stale epoch.** Recognize a pointer event at grant **v1** · preempt to **v2** · restore to
+     **v3** · then deliver the v1 event. It must be **dropped**. Run it against a build that guards on
+     the module's requested-set version and it must go red — that version never changed, so the event
+     executes.
+  2. **Out-of-order publication result.** Hold a `Publish` result for **v1**, apply `GrantChanged`
+     **v2**, then deliver the v1 result. It must **not** overwrite v2. Run it against a build with a
+     separate unguarded publication-result path and it must go red.
 - **Latency itself cannot be tested this way**, and pretending otherwise would be the exact failure
   §7 names. Actual hook latency is a [manual-validation](runbooks/manual-validation.md) row, measured
   on a real desktop, recorded with a date and a machine. No Core test result may ever be described as evidence about it.
@@ -801,10 +848,26 @@ noticed the change is the shape that eventually stalls something that matters.
 coordination. Publication ordering is a producer-side concern and stays there.
 
 **Pending requests coalesce for free**, because the sequencer samples at execution time: N pending
-requests collapse to one sample of the same world. **A coalesced publication is attributed
-event-driven if any of its requests was**, so a heartbeat that coalesces with a real event does not
-record a repair that never happened — a false alarm in a counter whose whole purpose is making a
-broken event path visible.
+requests collapse to one sample of the same world.
+
+**An event request names the foreground it was notified about.** It still carries no sample to publish
+— the sequencer does all the sampling — but it does carry an *identity claim*: `EVENT_SYSTEM_FOREGROUND`
+names a window, so the event path knows which one it is reporting. The sequencer then counts a
+**heartbeat correction** when:
+
+> the foreground it just sampled was named by **no** request in this batch.
+
+*A coarser rule — "attributed event-driven if any request was" — cannot support the guarantee it was
+written for.* If the event path reports a change to X while a *different* change to Y was missed, a
+coalesced batch containing that X event suppresses the count, and the missed Y repair goes unrecorded.
+The metric would then under-report precisely when the event path is *partly* working, which is the
+interesting failure.
+
+**And the residual imprecision, stated rather than hidden.** Under rapid switching the sequencer can
+sample a foreground whose notification is still in flight, and count a correction the event path was
+about to report. That is an **over**-count — the safe direction for a health signal, since it prompts
+a look rather than concealing a fault — and it is why this is read as a **rate over time**, not as an
+exact tally of dropped notifications.
 
 #### The heartbeat re-samples; it does not rubber-stamp
 
