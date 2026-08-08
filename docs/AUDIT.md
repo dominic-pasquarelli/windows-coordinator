@@ -146,8 +146,9 @@ Drift between what the docs say and what the repository actually contains.
       cannot evaluate it. Only running the thing evaluates it.
 - [ ] **Build and validation language is exactly as strong as its evidence.** This is the sharpest
       instance of Lens A here, so give it its own pass: grep the changed docs for *builds*, *works*,
-      *passes*, *verified*, *tested*, *validated*. Until a compiler has actually run, the correct word
-      is **"not compiled"**. Until a human has executed
+      *passes*, *verified*, *tested*, *validated*. As of 2026-08-08 *compiles* and *the Core tests
+      pass* are TRUE and checkable (CI at `7aef6ff`) — which makes this lens harder, not easier: the
+      next word anyone reaches for is *works*, and that is still false. Until a human has executed
       [runbooks/manual-validation.md](runbooks/manual-validation.md) on a real desktop, no statement
       about window placement, hotkey capture, DPI behavior, or the tray is permitted to sound settled.
       A green Core test run — once one is possible at all — proves Core logic and nothing a user can
@@ -457,7 +458,7 @@ Run it **less often** than `/audit`: before a freeze, when resuming a pillar or 
 gap, or periodically. It is **scopeable** — the whole project, one pillar, or one module. Route its
 findings exactly like an ordinary audit (§6) and **log it** (§7).
 
-**A caveat specific to this repository:** while no C# has been compiled, Pass B is reading a
+**A caveat specific to this repository:** the C# compiles and its Core logic is tested, but nothing has ever *run*, so Pass B is reading a
 *specification expressed in C#*, not a running system. Say so in the reconciliation. It still finds
 real drift — an interface with no doc, a doc describing a member that was never written — but it
 cannot find behavioral drift, because there is no behavior yet.
@@ -569,7 +570,7 @@ Each entry uses this skeleton:
 - <finding> → <why it is fine: historical / illustrative / planned>
 
 ### Health
-- C#: <compiled / never compiled> · Core tests: <N/N passing / not runnable, no toolchain>
+- C#: <compiles: CI <sha> / does not compile> · Core tests: <N/N passing> · Desktop behaviour: <validated <date> / none>
 - Manual validation: <what, on what machine, when / never performed>
 - Ground-truth reconciliations actually performed this pass:
   - module set: `ls src/modules/` = {…} ✓ reconciled against the README table + the roadmap
@@ -598,7 +599,7 @@ describes ([DOC_SPEC §2.1](DOC_SPEC.md)). That README also documents the invoca
 (`--quiet`, `--format json`, `--no-fail`, `--since <ref>`, `--accuracy`) and the exit-code contract.
 What follows here is the **protocol commentary**: what a green run is and is not allowed to mean.
 
-**The boundary check is the modularity teeth, and it is real.** Because no C# has been compiled, it
+**The boundary check is the modularity teeth, and it is real.** Because it must work with or without a compiler, it
 operates on **text**: `using` directives, namespace declarations, `[DllImport]` attributes in `.cs`
 files, and `ProjectReference` elements in `.csproj` files. That genuinely catches the violations that
 matter most — Win32 in a Core project, a module referencing another module — and it is the one

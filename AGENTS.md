@@ -17,9 +17,11 @@ trigger fabric) and [Atlas](docs/ATLAS.md) (desktop spatial truth) — are the o
 touches input or the desktop. Every module and pillar is split **Core** (`net9.0`, zero Windows
 dependencies, unit-tested anywhere) / **Shell adapter** (Windows-only, thin, validated by hand).
 
-**Read this before you claim anything:** the Python tooling (`coord`, the doc audit) is executed and
-verified; **no C# in this repository has ever been compiled**, no module exists, and nothing has
-ever run on Windows. Say "not compiled" — never "builds", "passes", or "works". Full statement:
+**Read this before you claim anything:** the Python tooling (`coord`, the doc audit) is executed
+and verified. **The C# compiles and the Core suites pass** — GitHub Actions at `7aef6ff`
+(2026-08-08), Ubuntu and Windows, 0 warnings, 45 tests, 0 failed. **But no module exists, there is
+no Shell adapter, and nothing has ever run on Windows** — no hotkey, no window, no tray icon, no UI.
+"Compiles" and "the Core tests pass" are checkable claims; **never** say "works". Full statement:
 CLAUDE.md → "Current honesty boundary".
 
 Key rules (full list in CLAUDE.md): match the architecture or flag it — propose an ADR rather than

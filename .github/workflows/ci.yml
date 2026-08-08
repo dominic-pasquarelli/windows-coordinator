@@ -4,8 +4,8 @@
 # WHAT THIS PIPELINE IS ALLOWED TO CLAIM — read this before trusting a green tick.
 #
 #   docs-audit     The documentation + modularity gate. It is stdlib-only Python 3.11 and needs no
-#                  .NET at all, so it RUNS TODAY, on every push, and it is the only job in this file
-#                  that is currently a real gate. A green run is a statement about *text*: links
+#                  .NET at all, so it runs on every push and on any machine — including one with no
+#                  SDK. A green run is a statement about *text*: links
 #                  resolve, frontmatter parses, the ADR sequence is intact, no Windows namespace
 #                  appears inside a Core project, docs/MAP.md is current. It is not a build.
 #
@@ -24,18 +24,20 @@
 #                  three failure shapes — a check that cannot fail · a claim stronger than its
 #                  evidence · an error found after the expensive step.
 #
-# HONEST STATE OF THIS FILE (2026-08-08, second revision): no .NET SDK has ever been present in the
-# environment this repository is authored in, so nothing here has been compiled LOCALLY. Both .NET
-# jobs below now compile every project regardless — the first revision of this file skipped
-# compilation whenever no solution file existed, which meant the repository could ship indefinitely
-# having never run a compiler over its own C# while an SDK sat installed and idle in this very
-# pipeline. **The absence of a solution is not a reason to skip a build**: a `.csproj` compiles on
-# its own, and the solution (TD-2) is a tooling convenience, not a compiler prerequisite.
+# OBSERVED STATE (2026-08-08, at commit 7aef6ff): these jobs ran and were green. Ubuntu compiled all
+# five portable projects and ran the Core suites — 45 tests, 0 failed, 0 skipped (Atlas 25, Platform
+# 20). Windows compiled the three projects under src/. Every build reported 0 warnings, which matters
+# because TreatWarningsAsErrors means one warning anywhere would have failed it.
 #
-# So CI is now the first compiler this project has ever had, and the first run of these jobs is the
-# first compile in its history. Expect real errors; that is the point, and a red build here is
-# information rather than failure. Until a run is observed green, no document in this repository may
-# say the C# compiles — report what the run actually returned.
+# CI is the first compiler this project ever had. The first revision of this file skipped compilation
+# whenever no solution file existed, so the repository could have shipped indefinitely having never
+# run a compiler over its own C# while an SDK sat installed and idle in this very pipeline. **The
+# absence of a solution is not a reason to skip a build**: a `.csproj` compiles on its own, and the
+# solution (TD-2) is a tooling convenience, not a compiler prerequisite.
+#
+# What a green run here still does not license: no Shell adapter exists, no module exists, and
+# nothing has ever run on Windows. Report what the latest run returned — a green tick from a previous
+# commit is not evidence about this one.
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 name: CI

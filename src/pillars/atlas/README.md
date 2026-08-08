@@ -42,18 +42,20 @@ What is **not** here: the placement policy and its outcomes, the qualifying-wind
 any interface through which a snapshot is obtained. There is no type in this project that a module
 would call to *get* a desktop; there is only the shape a desktop has.
 
-And none of it has been through a compiler. The C# here was authored in an environment with **no
-.NET SDK** (**TD-1** in [docs/TECH_DEBT.md](../../../docs/TECH_DEBT.md)): no project has been
-restored, no analyzer has run, no test exists. Every signature is a **proposal** whose first honest
-test is the first `coord build` on a Windows machine with .NET 9.
+And it compiles, and the arithmetic is tested. GitHub Actions at `7aef6ff` (2026-08-08) — Ubuntu and Windows, 0 warnings under `TreatWarningsAsErrors`; `Coordinator.Atlas.Core.Tests` passes
+**25 tests** across the layout math (the seam property swept over widths, refusals, negative-origin
+monitors, gap and padding, hit-testing) and the snapshot immutability guarantee.
 
-Say "not compiled". Not "builds", not "works", not "passes".
+That is the Core/Shell split paying for itself: this ran on a Linux runner with no monitor attached.
+It is also the entire claim — **no monitor has ever been enumerated and no window has ever been
+moved**, because the Shell adapter that would do either does not exist. Nothing here has been
+compiled on a developer machine (**TD-1** in [docs/TECH_DEBT.md](../../../docs/TECH_DEBT.md)).
 
 | | State |
 |---|---|
 | Architecture spine ([docs/ATLAS.md](../../../docs/ATLAS.md)) | **done** — model, snapshot contract, coordinate spaces, layout math, placement contract |
 | Decisions (ADR 0003, ADR 0006) | **done** |
-| `Coordinator.Atlas.Core` — model types, geometry, the layout math | **written, NEVER COMPILED** |
+| `Coordinator.Atlas.Core` — model types, geometry, the layout math | **compiles, 25 tests passing** (CI `7aef6ff`) |
 | Placement policy, the qualifying-window predicate, the snapshot source | **TODO** — not started |
 | `Coordinator.Atlas.Shell` | **TODO** — not created |
 | Core tests | **TODO** — not created |

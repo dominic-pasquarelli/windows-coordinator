@@ -87,7 +87,7 @@ existing. The rule has to be discoverable, or the first person to add a pillar w
 `WindowService` and the first person to add a module will call it Nimbus.
 
 **Neither module exists.** Zones and Chrono are roadmap entries with no code
-([COORDINATOR.md §8](../COORDINATOR.md)), and nothing has been compiled ([TD-1](../TECH_DEBT.md)). The
+([COORDINATOR.md §8](../COORDINATOR.md)), and no module exists to carry a name yet ([TD-5](../TECH_DEBT.md)). The
 convention is therefore being applied to names before it is applied to anything those names refer to.
 
 ## Alternatives considered

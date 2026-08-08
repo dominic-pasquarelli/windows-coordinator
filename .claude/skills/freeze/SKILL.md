@@ -66,11 +66,11 @@ and stop there. An un-frozen project that says so is recoverable. A falsely-froz
      [runbooks/manual-validation.md](../../../docs/runbooks/manual-validation.md), performed by a
      human, on a named machine, on a date. **Undated validation is not validation.**
    - **Today this gate item cannot be ticked at all.** No .NET SDK has ever been present in the
-     environment this repository was authored in; no C# in it has ever been compiled. The correct
+     environment this repository is authored in, though CI compiles every project. The correct
      record entry is not a blank and not a tick:
 
      ```
-     C#: never compiled (no toolchain has ever been present — TD-1).
+     C#: compiles (CI <sha>, Ubuntu + Windows, 0 warnings); no local toolchain (TD-1).
      Core tests: not runnable.
      Python tooling (coord, doc-audit): executed and verified.
      Manual validation: never performed — nothing has ever run on Windows.

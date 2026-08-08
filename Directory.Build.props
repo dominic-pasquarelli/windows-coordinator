@@ -8,10 +8,10 @@
     (ADR 0003) means there will eventually be two projects per module and per pillar, and a setting
     that has to be repeated per project is a setting that will eventually disagree with itself.
 
-    WARNING — NEVER COMPILED. This file was authored in an environment with no .NET SDK. No project
-    in this repository has been built, restored, or evaluated by MSBuild even once. Every property
-    below is an intention, not an observed behaviour. The first `coord build` on a Windows/.NET 9
-    machine is the first time any of it will be tested (docs/NEXT.md — Active focus, TD-1).
+    EVALUATED BY MSBUILD, AND THE SETTINGS HOLD. GitHub Actions built every project on Ubuntu and
+    Windows at 7aef6ff (2026-08-08) with **0 warnings** — which is the interesting part, because
+    TreatWarningsAsErrors below means a single warning anywhere would have failed the build. These
+    are no longer intentions. Still never evaluated on a developer machine (no local SDK, TD-1).
 
     Deliberately NOT set here:
       * TargetFramework — each project declares its own. Core projects are `net9.0` with no Windows

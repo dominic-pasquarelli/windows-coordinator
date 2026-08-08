@@ -70,7 +70,8 @@ agent count to scope: one module is one agent per pass; the whole project means 
 
 ## 3. The caveat that is specific to this repository — state it in the reconciliation
 
-**No C# here has ever been compiled.** Pass B is therefore reading a *specification expressed in C#*,
+**The C# compiles and its Core logic is tested (CI `7aef6ff`), but nothing here has ever run.**
+Pass B is therefore reading a *partly-verified specification expressed in C#*,
 not a running system, and you must say so in the write-up rather than letting the output imply
 otherwise.
 
@@ -87,7 +88,7 @@ What that does to the method:
   though the mechanical checker cannot see it.
 
 The **first successful compile is the single highest-value moment to run this**, because it converts
-a large number of "specified, not compiled" statements into either "compiles" or "does not compile,
+a large number of "compiles but unexercised" statements into either "runs" or "does not run,
 here is why" — and both outcomes are drift against every doc written before it.
 
 ## 4. Reconcile → fix → log (same routing as /audit)

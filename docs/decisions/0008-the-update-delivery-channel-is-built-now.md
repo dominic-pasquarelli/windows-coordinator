@@ -48,8 +48,8 @@ install, with a settings migration proven end to end.
 
 **Nothing here exists.** No package has been produced. No install has ever been performed. No version
 has ever been compared. The seam described above is a plan in [NEXT.md](../NEXT.md), not a mechanism,
-and — as with everything else in this repository — none of the surrounding code has ever been compiled
-([TD-1](../TECH_DEBT.md)). [TD-6](../TECH_DEBT.md) carries the gap.
+and while the surrounding code now compiles (CI `7aef6ff`, 2026-08-08), **not one line of delivery
+machinery exists to compile**. [TD-6](../TECH_DEBT.md) carries the gap.
 
 This ADR is therefore a decision about **priority and ownership**, not a record of work completed. It
 is written now because the specific failure it prevents is a failure of sequencing, and sequencing

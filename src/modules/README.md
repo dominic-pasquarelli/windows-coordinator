@@ -39,7 +39,7 @@ Neither Zones nor Chrono is scaffolded. When one is built it will be built from
 [docs/MODULE_SPEC.md](../../docs/MODULE_SPEC.md), not from a skeleton someone left lying here
 months earlier with no memory of what it was for.
 
-Note also that no C# anywhere in this repository has been compiled — there was no .NET SDK in the
+Note also that no C# anywhere in this repository has been compiled *locally* — there is no .NET SDK in the
 environment it was authored in — so the contract a module will be written against is itself
 unverified (**TD-1** and **TD-5** in [docs/TECH_DEBT.md](../../docs/TECH_DEBT.md)).
 

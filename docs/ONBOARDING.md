@@ -40,11 +40,13 @@ the desktop: [Conduit](CONDUIT.md) (the input & trigger fabric) and [Atlas](ATLA
 spatial truth). The **Shell** — the WinUI settings and dashboard surface — is platform core today,
 and becomes a pillar only when a second independent consumer needs the same registry-driven surface.
 
-**Before you read anything else, calibrate on what exists.** The documentation system, the operating
-protocols, the audit tooling and the `coord` entry point are real and they run. The Python tooling
-was executed and verified. **No C# in this repository has ever been compiled**, no module exists, and
-nothing has ever run on Windows. There is no solution file yet. Everything Windows-facing in these
-docs is design intent backed by documented API behavior — not observation. The full statement is in
+**Before you read anything else, calibrate on what exists.** The documentation system, the
+operating protocols, the audit tooling and the `coord` entry point are real and they run. The Python
+tooling was executed and verified. **The C# compiles and the Core suites pass** — GitHub Actions at
+`7aef6ff` (2026-08-08), Ubuntu and Windows, 0 warnings, 45 tests, 0 failed. **But no module exists,
+there is no Shell adapter, there is no solution file, and nothing has ever run on Windows.**
+Everything Windows-facing in these docs is design intent backed by documented API behavior — not
+observation. The full statement is in
 [CLAUDE.md](../CLAUDE.md) → "Current honesty boundary", and the first task waiting for a real
 machine is at the top of [NEXT.md](NEXT.md).
 

@@ -130,17 +130,18 @@ abstractions with no consumer.
   exist and run.** That is the bootstrap deliverable.
 - **The Python tooling is executed and verified.** `coord audit`, `coord map` and `coord doctor` were
   written and run in an environment with **no .NET SDK at all**.
-- **No C# has ever been compiled.** Not once. There is no solution file yet — generating it with
-  `dotnet new sln` on a Windows/.NET machine is the first task in [docs/NEXT.md](docs/NEXT.md). The
-  platform contract interfaces are written and unverified.
-- **Nothing has ever run on Windows.** No hotkey registered, no window placed, no tray icon shown,
-  no UI opened. Every Windows-facing statement in these docs is design intent backed by documented
-  API behavior, not observation.
+- **The C# compiles and the Core suites pass.** GitHub Actions at commit `7aef6ff` (2026-08-08) built every project on **Ubuntu** and on **Windows** — 0 warnings, under `TreatWarningsAsErrors` — and the Core suites passed: **45 tests, 0 failed, 0 skipped** (Atlas 25, Platform 20). There is still no solution file
+  (TD-2) — CI builds each `.csproj` directly, because a solution is a tooling convenience rather
+  than a compiler prerequisite.
+- **Nothing has ever run on Windows.** No hotkey registered, no window placed, no monitor
+  enumerated, no tray icon shown, no UI opened — there is no Shell adapter to do any of it. Every
+  Windows-facing statement in these docs is design intent backed by documented API behavior, not
+  observation.
 
-The honest one-line status is: *the documentation gate is green — `./coord audit` exits 0 — and the
-C# is not compiled.* **Confirm the first clause rather than repeating it:** run `./coord audit` and
-`./coord map --check`; both exiting 0 is the whole claim, and it is a fact about that run, not a
-standing property of the repo. The second clause doesn't move until a real machine records a build.
+The honest one-line status is: *the documentation gate is green, the C# compiles, the Core tests
+pass — and no desktop behavior exists or has been validated.* **Confirm it rather than repeating
+it:** run `./coord audit` and `./coord map --check`, and read the latest CI run. Each is a fact
+about that run, not a standing property of the repo.
 
 ---
 
@@ -211,12 +212,18 @@ Setup detail: [docs/runbooks/dev-setup.md](docs/runbooks/dev-setup.md).
   reader can run and a result they can see — never as a remembered property — and treat an outside
   check on your own output as load-bearing rather than as ceremony.
 
-- **The bootstrap container had no .NET SDK, so nothing here has been compiled — and the gates that
-  *do* run are all document gates.** The docs audit, the map check and the Python tooling are
-  genuinely runnable (verify with `./coord audit` and `./coord map --check`, both must exit 0), but
-  none of them touches a compiler. It is genuinely easy to read a green `coord audit` and drift into
-  writing "the platform builds" — it does not, and no one knows whether it will. Before P1 is
-  recorded as done on a real machine, the only truthful phrasing is "written, not compiled."
+- **A green compile is easy to over-read, and now there is one to over-read.** CI compiles every
+  project and runs the Core suites, so "the C# builds" and "the tests pass" are finally true — and
+  the very next sentence anyone reaches for is "so the platform works," which is false and will stay
+  false for a long time. There is no Shell adapter, no module, no tray icon and no window placement:
+  **nothing a user could see has been written, let alone validated.** The distance between "compiles"
+  and "works" is the entire remaining project.
+
+- **The first version of this repository documented its unverified state very carefully instead of
+  verifying it.** CI installed a .NET 9 SDK and then skipped the build because no solution file
+  existed — for the whole of PR #1, until a reviewer pointed out that a `.csproj` compiles perfectly
+  well on its own. The lesson worth keeping: a precise description of a limitation can feel like
+  rigor while being the thing that prevents you noticing the limitation was optional.
 
 - **`coord` is not `wc`.** The obvious abbreviation for "Windows Coordinator" collides with the
   POSIX word-count command, and shadowing `wc` on a dev machine breaks scripts in ways that are

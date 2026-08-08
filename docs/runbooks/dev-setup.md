@@ -81,7 +81,9 @@ stack:
   SDK clearly rather than failing obscurely — it was written in exactly that situation.
 
 What you **cannot** do on this path: `coord build`, `coord test`, `coord run`, and every claim that
-depends on them. Say "not compiled"; do not round up.
+depends on them locally. Note that CI *does* compile and test on every push, so "does it build?" is
+answered by the latest run rather than by this machine — but a green run there licenses "compiles"
+and "the Core tests pass", never "works".
 
 ---
 

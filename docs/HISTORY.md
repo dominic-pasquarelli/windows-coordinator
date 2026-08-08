@@ -27,6 +27,43 @@ related:
 
 ---
 
+## 2026-08-08 — P0 closeout · The first compile, and two rounds of external review
+
+Between the bootstrap pass and this entry, PR #1 was reviewed twice by a human reviewer and corrected
+twice. The bootstrap's own four adversarial verifiers had found real defects — but only defects of
+the kind an unverifiable artifact permits: broken links, drifted duplicates, overclaimed status. The
+reviewer found seven that a compiler and a test would have surfaced on day one, and then an eighth
+that only appears after the first two are fixed.
+
+**Round one — seven semantic findings.** A `ProjectReference` in `coord new-module` that pointed at a
+project the `.Core` rename had moved; a settings migration API that ran on the deserialized object
+and therefore could not perform the renames and reshapes migrations exist for; `IReadOnlyList<T>`
+parameters that left the coherent-snapshot guarantee unenforced; a `Capability` that defaulted into
+the one state its own comment forbade; `coord test` widening to the whole solution; a documented
+bootstrap sequence that guaranteed a red build; and — the one that mattered most — **CI that
+installed a .NET 9 SDK and then skipped the build because no solution file existed.** A `.csproj`
+compiles on its own. The repository had spent an entire PR documenting an unverified state with
+great care while the means of verifying it sat idle in its own pipeline.
+
+**Round two — the evidence closeout.** With CI compiling, roughly sixty-five `NEVER COMPILED` claims
+across thirty-nine files became false, and were swept to what was actually observed.
+
+**The observed result, at commit `7aef6ff`:** GitHub Actions built all five projects on Ubuntu and
+the three production projects on Windows, **0 warnings** under `TreatWarningsAsErrors`, and ran
+**45 Core tests — 0 failed, 0 skipped** (Atlas 25, Platform 20). That is the first compile in the
+project's history and the first test run of any kind.
+
+**What it does not license, stated because it is the whole remaining project:** no Shell adapter
+exists, no module exists, and nothing has ever run on Windows. No hotkey, no window, no monitor, no
+tray icon, no UI. [ADR 0011](decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)
+records the migration redesign; the full finding-by-finding account is in
+[audit-log.md](audit-log.md).
+
+**The durable lesson**, worth more than any individual fix: *a precise description of a limitation
+can feel like rigor while being the thing that stops you noticing the limitation was optional.*
+
+---
+
 ## 2026-08-08 — P0 · Bootstrap: the documentation system, the operating protocols, and an uncompiled skeleton
 
 The repository was created in a single authoring pass, AI-assisted and owner-supervised. Its purpose

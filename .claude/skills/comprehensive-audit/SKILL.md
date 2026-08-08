@@ -93,7 +93,8 @@ B ↔ reality, A ↔ B. The unique payoff is the **agreed-but-wrong** finding: d
 each other while both drift from the intended design. **Blindness is the mechanism** — each pass agent
 sees only its half. Scope to the concept-dense area when whole-project is too heavy.
 
-Carry the deep-audit caveat into the write-up: **no C# here has ever been compiled**, so Pass B reads
+Carry the deep-audit caveat into the write-up: **the C# compiles and its Core logic is tested, but
+nothing here has ever run on a desktop**, so Pass B reads
 a specification expressed in C#, not a running system. It finds documentation drift; it cannot find
 behavioral drift, because there is no behavior yet.
 

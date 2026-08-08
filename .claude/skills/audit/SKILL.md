@@ -27,7 +27,9 @@ ever been compiled.** Every description of a class, a project, an interface, or 
 
 The single most dangerous drift this protocol guards against is a doc quietly upgrading one into the
 other — "the host loads modules" where the truth is "the host is *specified* to load modules; it has
-never been compiled." Lens A hunts that phrasing specifically. Carry it into every lens: a green
+compiles but does nothing." As of 2026-08-08 (CI `7aef6ff`) *compiles* and *the Core tests pass*
+are true; *works* is not, and the gap between them is now the easiest place to drift. Lens A hunts
+that phrasing specifically. Carry it into every lens: a green
 `coord audit` is a statement about text, a green `coord test` (once one is possible) is a statement
 about Core logic, and neither is a statement about the desktop.
 

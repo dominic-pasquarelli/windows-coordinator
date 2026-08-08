@@ -19,7 +19,8 @@ related:
 > arbitrates who gets what and dispatches the result somewhere it is safe to do work.
 >
 > **One sentence:** this directory holds Conduit's declaration types; the contract they must satisfy
-> is [docs/CONDUIT.md](../../../docs/CONDUIT.md), and **none of it has ever been compiled**.
+> is [docs/CONDUIT.md](../../../docs/CONDUIT.md). The declarations **compile**; the arbiter that
+> gives them meaning is unwritten.
 
 ## Status: contract types written, never compiled
 
@@ -37,17 +38,19 @@ registry, no arbiter, no interface a module registers through, and no dispatcher
 this pillar exists for, central conflict arbitration, has not been written.
 
 And none of it has been through a compiler. The C# here was authored in an environment with **no
-.NET SDK** (**TD-1** in [docs/TECH_DEBT.md](../../../docs/TECH_DEBT.md)): no project has been
-restored, no analyzer has run, no test exists. Every signature is a **proposal** whose first honest
-test is the first `coord build` on a Windows machine with .NET 9.
+.NET SDK** (**TD-1** in [docs/TECH_DEBT.md](../../../docs/TECH_DEBT.md)), so CI was its first
+reader. It compiles: GitHub Actions at `7aef6ff` (2026-08-08) — Ubuntu and Windows, 0 warnings under `TreatWarningsAsErrors`.
 
-Say "not compiled". Not "builds", not "works", not "passes".
+**It has no tests, and that is the honest gap here** — unlike Atlas, this pillar's interesting logic
+(the arbiter that decides who gets a contested chord) is not written yet, so there is nothing to
+test. Compiling a set of declarations proves they are well-formed and nothing more. Not one input
+event has ever been dispatched.
 
 | | State |
 |---|---|
 | Architecture spine ([docs/CONDUIT.md](../../../docs/CONDUIT.md)) | **done** — intent taxonomy, arbitration model, dispatch contract, extension contract |
 | Decisions (ADR 0003, ADR 0005) | **done** |
-| `Coordinator.Conduit.Core` — the declaration types | **written, NEVER COMPILED** |
+| `Coordinator.Conduit.Core` — the declaration types | **compiles** (CI `7aef6ff`), **no tests** |
 | The chord grammar, the registry, the arbiter, the dispatcher | **TODO** — not started |
 | `Coordinator.Conduit.Shell` | **TODO** — not created |
 | Core tests | **TODO** — not created |

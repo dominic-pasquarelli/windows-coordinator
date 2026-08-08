@@ -15,7 +15,8 @@
     as a Core project from the declared target framework below, and will fail the gate on a
     P/Invoke or a Windows namespace appearing here.
 
-    WARNING — NEVER COMPILED. No .NET SDK existed in the environment this was authored in.
+    COMPILES. Built by GitHub Actions on Ubuntu and Windows at 7aef6ff (2026-08-08), 0 warnings.
+    NOT yet covered by any test — the arbiter it exists for is unwritten (docs/NEXT.md).
 
     Shared properties come from Directory.Build.props at the repository root.
   -->

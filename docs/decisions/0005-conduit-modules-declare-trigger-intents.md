@@ -97,7 +97,7 @@ mitigation is the degradation principle — a module whose intent cannot be sati
 explicitly and the rest keeps running — but the concentration of risk is real, and it is the price of
 the concentration of knowledge that makes arbitration possible at all.
 
-**None of this exists.** Conduit is specified and not written; nothing has been compiled
+**Almost none of this exists.** Conduit's declaration types compile (CI `7aef6ff`, 2026-08-08); the arbiter, the registry and the dispatcher are unwritten, and nothing has been compiled
 ([TD-1](../TECH_DEBT.md)); no hotkey has ever been registered by this project, and no hook-callback
 latency has ever been measured ([TD-11](../TECH_DEBT.md)).
 

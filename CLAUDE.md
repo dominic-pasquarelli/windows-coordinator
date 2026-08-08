@@ -42,17 +42,18 @@ is real and it runs. Everything else is design.
 
 - The Python tooling (`tools/coord/coord.py`, `tools/doc-audit/audit.py`) is **executed and
   verified**. `coord audit` and `coord map` work with no .NET installed at all.
-- **No C# in this repository has ever been compiled.** The bootstrap was authored in a container
-  with Python and Node and **no .NET SDK**. Every C# artifact — including the interface sketches in
-  [MODULE_SPEC.md](docs/MODULE_SPEC.md) — is written and unverified.
-- **No module exists.** Zones and Chrono are roadmap entries with a directory-level plan. Neither is
-  scaffolded.
-- **Nothing has ever run on Windows.** No hotkey has been registered, no window has been placed, no
-  tray icon has appeared.
+- **The C# compiles, and the Core logic is tested.** GitHub Actions at commit `7aef6ff` (2026-08-08) built every project on **Ubuntu** and on **Windows** — 0 warnings, under `TreatWarningsAsErrors` — and the Core suites passed: **45 tests, 0 failed, 0 skipped** (Atlas 25, Platform 20). The authoring container has no
+  .NET SDK, so CI was the first compiler this project ever had.
+- **That is a claim about compilation and pure logic — nothing more.** No module exists (Zones and
+  Chrono are roadmap entries, deliberately unscaffolded), there is no Shell adapter, and **nothing
+  has ever run on Windows**: no hotkey registered, no window placed, no monitor enumerated, no tray
+  icon shown, no UI opened.
+- **There is still no solution file** (TD-2), and `coord build` / `coord run` have never executed
+  their `dotnet` path — CI builds projects directly.
 
-Say "not compiled." Never say "builds", "passes", or "works" about any of it. The first task in
-[docs/NEXT.md](docs/NEXT.md) is to restore the toolchain on a Windows/.NET machine, generate the
-solution, compile the skeleton, and record the result with a date and a machine.
+Never say "works" about any of it. "Compiles" and "the Core tests pass" are now true and checkable;
+everything a user could see is still design intent, and only
+[manual-validation.md](docs/runbooks/manual-validation.md) on a real desktop can change that.
 
 **Operating philosophy:** interests shift; accumulated capability should compound. Build a module
 only for a real want or to validate the contract. Prefer a clean seam with one proven consumer over
@@ -394,14 +395,17 @@ calling a phase done:
   performed on a real Windows desktop, **for any claim about window placement, input, DPI, the tray,
   or the UI** — with the result and the date written down.
 
-Until a Windows/.NET machine has run the last three, **do not assert project health from memory —
-run the gate and report what it actually returned.** `coord audit` and `coord map --check` must each
-exit 0; a green documentation gate is a fact about the run you just performed, not a standing
-property of this repository, and it goes red the moment a doc changes without the map being
-regenerated. The other half needs no command and does not move until someone records a build on a
-real machine: **the C# is not compiled.** So the honest statement takes the shape *"`coord audit`
-exits 0, so the documentation gate is green; the C# is not compiled"* — and if the checker says
-something else, you report that instead.
+**Do not assert project health from memory — run the gate and report what it actually returned.**
+`coord audit` and `coord map --check` must each exit 0; a green documentation gate is a fact about
+the run you just performed, not a standing property of this repository, and it goes red the moment a
+doc changes without the map being regenerated. The build half is answered the same way: **read the
+latest CI run**, which compiles every project on Ubuntu and Windows and runs the Core suites. At
+`7aef6ff` (2026-08-08) that was green — 0 warnings, 45 tests, 0 failed.
+
+So an honest status has this shape: *"`coord audit` exits 0, CI at `<sha>` compiled every project
+and passed N tests — and no desktop behavior exists or has been manually validated."* The last
+clause is not a caveat you may drop when the first two are green; it is the part a user would
+actually care about, and it is unchanged since day one.
 
 ## Status
 

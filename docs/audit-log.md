@@ -26,6 +26,71 @@ related:
 
 ---
 
+## 2026-08-08 — PR #1 evidence closeout (repository-wide sweep after the first green CI run)
+
+**Scope:** every claim in the repository about build and test status, re-stated against an observed
+run rather than an assumption. Triggered by review: with CI compiling, the repository's own honesty
+machinery had inverted — roughly 65 claims across 39 files asserted something that was no longer
+true.
+
+### The observed result — verified from the run, not from the reviewer's summary
+
+Commit `7aef6ff`, GitHub Actions, all six checks green:
+
+| Job | What it actually did |
+|---|---|
+| Core build + tests (ubuntu) | built **5 portable projects** (3 production + 2 test), each `0 Warning(s) 0 Error(s)` |
+| Core suites (ubuntu) | **45 tests, 0 failed, 0 skipped** — Atlas 25, Platform 20, run per-project by `coord test` |
+| Windows build | built the **3 projects under `src/`**, each `0 Warning(s) 0 Error(s)` |
+| Docs audit | `audit.py`, `genmap.py --check`, and the 4 scaffold tests, all green |
+
+The zero-warning result is the load-bearing part: `TreatWarningsAsErrors` is on, so a single warning
+anywhere would have failed the build. **Read from the job logs, not from the check-run conclusions** —
+a green tick is a claim about a job, and this project's standard is that the claim gets checked.
+
+**Precision worth keeping:** the Windows job compiled the same three *portable* projects with a
+Windows toolchain. There is no Windows-*targeted* project in the repository at all, so nothing said
+here is evidence about P/Invoke, WinUI, or the Shell.
+
+### Fixed this pass
+
+- 🔴 **~65 stale evidence claims across 39 files.** `NEVER COMPILED` banners in every `.cs` file, the
+  three `.csproj` headers, `Directory.Build.props`, `coord.py`'s module docstring, the `ci.yml`
+  header, three pillar/platform READMEs, `tests/README.md`, and the status sections of CLAUDE.md,
+  README.md, AGENTS.md, NEXT.md, ONBOARDING.md, OPERATING_MODEL.md, AUDIT.md, TECH_DEBT.md, the four
+  skills, and five ADRs. Each replaced with the observation **and its boundary** — never a bare
+  "compiles".
+- 🟠 **`docs/NEXT.md` said "the three projects" immediately above a list of five.** Now "the five
+  current projects — three production and two test projects", which is also the list CI requires.
+- 🟠 **TD-1, TD-2 and TD-4 narrowed** to what remains true: no *local* toolchain, no solution file,
+  and Windows-targeted code compiled-but-never-run.
+
+### Accepted (not drift — do not re-triage)
+
+- The `// SKETCH — not compiled` markers in ATLAS.md, CONDUIT.md and the add-a-module recipe are
+  **correct**: those snippets are illustrative prose, genuinely not part of any project.
+- The bootstrap entries below this one still say "nothing has been compiled". They are **dated
+  records and were true when written**; rewriting history to match the present is the opposite of an
+  audit trail. ADRs got dated amendment notes instead of edits.
+
+### Health
+
+- `coord audit` **0 ERROR / 0 WARN / 0 INFO**; `coord map --check` clean; closeout clean.
+- Scaffold tests **4 passing**. Core suites **45 passing** (CI).
+- **C#: compiles** (CI `7aef6ff`, Ubuntu + Windows, 0 warnings). **Desktop behaviour: none
+  implemented, none validated.**
+
+### Carry-forward — the one thing that matters most
+
+The evidence machinery now has to defend the *opposite* error from the one it was built for. For
+three rounds the risk was overclaiming an unverified state; from here the risk is that "compiles" and
+"45 tests pass" quietly become "it works". They are not close. There is no Shell adapter, no module,
+no process, and no window has ever moved. **The distance between a green build and a tool someone can
+use is the entire remaining project**, and [manual-validation.md](runbooks/manual-validation.md) —
+still never executed by anyone (TD-9) — is the only thing that can close it.
+
+---
+
 ## 2026-08-08 — PR #1 external code review (human reviewer, seven findings)
 
 **Scope:** the whole bootstrap PR, reviewed by a human against the guarantees the documentation

@@ -1,8 +1,12 @@
 // -------------------------------------------------------------------------------------------------
-// WARNING — NEVER COMPILED. Authored 2026-08-08 in an environment with no .NET SDK. Not one line of
-// C# in this repository has been through a compiler, an analyzer, or a test runner. Treat every
-// signature in this file as a proposal to be verified by the first build, not as working code.
-// See docs/NEXT.md (Active focus) and TD-1 in docs/TECH_DEBT.md.
+// COMPILES. First observed 2026-08-08 at commit 7aef6ff: GitHub Actions built every project on
+// Ubuntu (0 warnings, under TreatWarningsAsErrors) and on Windows, and the Core suites passed —
+// 45 tests, 0 failed. Authored without a local SDK, so the compiler was the first reader.
+//
+// That is a statement about COMPILATION and, where tests cover it, about pure logic. It is not a
+// statement about behaviour: no window has been placed, no hotkey registered, no monitor
+// enumerated, no tray icon shown, and no Shell adapter exists. Those come only from
+// docs/runbooks/manual-validation.md, performed by a human on a real Windows desktop.
 // -------------------------------------------------------------------------------------------------
 
 namespace Coordinator.Platform;

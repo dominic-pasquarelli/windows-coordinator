@@ -18,7 +18,8 @@
     geometry does not have capabilities, and adding a reference "for consistency" would be a
     dependency with no consumer.
 
-    WARNING — NEVER COMPILED. No .NET SDK existed in the environment this was authored in.
+    COMPILES. Built by GitHub Actions on Ubuntu and Windows at 7aef6ff (2026-08-08), 0 warnings,
+    and covered by Coordinator.Atlas.Core.Tests (25 tests, all passing).
 
     Shared properties come from Directory.Build.props at the repository root.
   -->

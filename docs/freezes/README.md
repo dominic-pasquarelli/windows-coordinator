@@ -86,7 +86,8 @@ It is the honest form of the gate, and it is load-bearing for this project speci
 repository's environment; **not one line of C# has been compiled** (**TD-1** in
 [TECH_DEBT.md](../TECH_DEBT.md)). The correct record entry is not a blank and not a tick — it is:
 
-> `C#: never compiled (no toolchain has ever been present). Core tests: not runnable.`
+> `C#: compiles (CI 7aef6ff, Ubuntu + Windows, 0 warnings). Core tests: 45/45 passing. Desktop
+> behaviour: none implemented, none validated.`
 > `Python tooling: executed and verified. Manual validation: never performed.`
 
 That is a legitimate freeze. What would **not** be legitimate is a ticked box, or a phrase like
@@ -197,7 +198,7 @@ updated: YYYY-MM-DD
 ## Health at freeze
 - audit: N error / N warn / N info   ·   closeout (vs origin/main): clean
 - map: current
-- C#: <never compiled | builds, SDK X on machine Y, YYYY-MM-DD>
+- C#: <compiles: CI <sha>, <runners>, <warnings> | builds locally, SDK X on machine Y, YYYY-MM-DD>
 - Core tests: <N/N passing on <OS> | not runnable — no toolchain>
 - Manual validation: <scenarios run, machine, monitor arrangement + scaling, date | never performed>
 

@@ -12,8 +12,9 @@
     declaration, the settings file location — belongs to a separate Windows-targeted project under
     src/shell/, which does not exist yet.
 
-    WARNING — NEVER COMPILED. No .NET SDK existed in the environment this was authored in. This
-    project has never been restored, built, or referenced by anything.
+    COMPILES. Built by GitHub Actions on Ubuntu and Windows at 7aef6ff (2026-08-08), 0 warnings
+    under TreatWarningsAsErrors, and referenced by Coordinator.Platform.Core.Tests (20 tests, all
+    passing). Still never built on a developer machine — there is no local SDK (TD-1).
 
     Shared properties (LangVersion, Nullable, ImplicitUsings, TreatWarningsAsErrors, the version)
     come from Directory.Build.props at the repository root. Do not repeat them here.

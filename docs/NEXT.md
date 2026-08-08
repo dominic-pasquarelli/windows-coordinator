@@ -43,10 +43,11 @@ related:
 
 ---
 
-## ▶▶ START HERE — 2026-08-08: the project is bootstrapped and nothing has been compiled
+## ▶▶ START HERE — 2026-08-08: bootstrapped, compiling, and nothing a user can see
 
-This repository was created today in a single authoring pass. Read the next three paragraphs before
-you touch anything; they are the difference between resuming correctly and resuming confidently.
+This repository was created today in a single authoring pass, then corrected twice under review.
+Read the next four paragraphs before you touch anything; they are the difference between resuming
+correctly and resuming confidently.
 
 **What exists and is verified.** The documentation system and the operating protocols are in place:
 governance ([CLAUDE.md](../CLAUDE.md)), the platform architecture, both pillar spines, the module and
@@ -63,12 +64,14 @@ on that page.
 
 **What exists, and what verifies it.** A C# skeleton — project files and contract interfaces for the
 platform core and the two pillars — plus two Core test projects covering the layout arithmetic, the
-snapshot immutability guarantee, the settings migration chain, and the capability invariants. **None
-of it has been compiled locally**, because the authoring container has no .NET SDK; the correct
-phrasing for anything not yet observed is **"not compiled"** — never "builds," never "works"
+snapshot immutability guarantee, the settings migration chain, and the capability invariants. **It
+compiles and the tests pass:** GitHub Actions at `7aef6ff` (2026-08-08) built all five projects on
+Ubuntu and the three production projects on Windows, 0 warnings under `TreatWarningsAsErrors`, and
+ran 45 tests with 0 failures (Atlas 25, Platform 20). Nothing has been compiled *locally* — the
+authoring container has no .NET SDK — so `coord build` and `coord run` remain unexercised
 ([OPERATING_MODEL §7](OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean)).
 
-**But CI is now the compiler, and that is new as of the review round on 2026-08-08.** The first
+**CI is the compiler, and that is new as of the review round on 2026-08-08.** The first
 revision of [`ci.yml`](../.github/workflows/ci.yml) *skipped* both .NET jobs whenever no solution
 file existed — so the repository could ship indefinitely having never run a compiler over its own
 C#, while a .NET 9 SDK sat installed and idle in that very pipeline. **The absence of a solution
@@ -77,12 +80,14 @@ project on every push, and the Linux job runs the Core suites. So the honest sta
 "nothing has been compiled" — it is **"read the latest CI run and report what it returned."** If you
 are resuming and the run was green, say so with the date; if it was red, the errors are the work.
 
-**What does not exist.** There is **no module.** Zones and Chrono are roadmap entries with a
-directory-level plan and nothing more — deliberately not scaffolded, because an empty directory is a
-claim. There is **no solution file** (`.sln` files carry GUIDs that cannot be verified in a
-container; generating it is step 1 below). **Nothing has ever run on Windows.** No hotkey has been
-registered, no monitor enumerated, no window moved, no tray icon shown. The first honest signal this
-project has ever received is the one you are about to generate.
+**What does not exist — and this is the part that matters now that it compiles.** There is **no
+module.** Zones and Chrono are roadmap entries with a directory-level plan and nothing more —
+deliberately not scaffolded, because an empty directory is a claim. There is **no Shell adapter**, so
+not one line of Windows-facing code exists in this repository. There is **no solution file** (`.sln`
+files carry GUIDs that cannot be verified in a container; generating it is step 2 below).
+**Nothing has ever run on Windows.** No hotkey has been registered, no monitor enumerated, no window
+moved, no tray icon shown. A green build and 45 green tests move none of that — the distance between
+"compiles" and "does something" is the entire remaining project.
 
 ### Three traps for anyone resuming from this page
 
@@ -104,7 +109,7 @@ project has ever received is the one you are about to generate.
 
 ---
 
-## Active focus — restore the toolchain and compile the skeleton, then record what happened
+## Active focus — get a developer machine building, then start the platform host
 
 *(A bounded detour drops its resume anchor as the first line of this section — `↩ RESUME AFTER
 DETOUR: <where work stopped>` — and clears it on snap-back. Mode 3 of the snapshot protocol in
@@ -115,11 +120,10 @@ it, not this page, is the current truth about whether the C# builds. Then do the
 machine with the .NET 9 SDK installed**: the solution, the Windows-targeted half, and everything a
 Linux runner structurally cannot reach.
 
-**A standing chore this round created:** every `.cs` file, both pillar READMEs, `Directory.Build.props`
-and several docs still carry a `NEVER COMPILED` banner. The moment a CI run is observed green, those
-banners become false and must be replaced with what was actually observed — the run, the date, and
-what it does *not* cover. Do not delete them wholesale; a banner that overclaims in the other
-direction is the same defect mirrored.
+**The evidence sweep is done.** The `NEVER COMPILED` banners that used to sit at the top of every
+`.cs` file, both pillar READMEs and `Directory.Build.props` were replaced on 2026-08-08 with what was
+actually observed at `7aef6ff` — the run, the date, and what it does *not* cover. If you add a file,
+match that shape: state the observation and its boundary, never a bare "compiles".
 
 Setup detail is in [runbooks/dev-setup.md](runbooks/dev-setup.md). The sequence:
 
@@ -129,7 +133,7 @@ Setup detail is in [runbooks/dev-setup.md](runbooks/dev-setup.md). The sequence:
    that carries no information (failure shape 1 in
    [OPERATING_MODEL §7](OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean)).
 2. **Generate the solution.** `dotnet new sln --name Coordinator` at the repository root, then add
-   the three projects that exist today — run verbatim:
+   the five current projects — three production and two test projects — run verbatim:
 
    ```sh
    dotnet new sln --name Coordinator

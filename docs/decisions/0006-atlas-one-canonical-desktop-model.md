@@ -99,7 +99,7 @@ matches is a condition a module can handle, whereas the 48-pixel failure above i
 can even notice.
 
 **Nothing here has been observed.** No monitor has ever been enumerated by this project, no window has
-ever been moved by it, and nothing has been compiled ([TD-1](../TECH_DEBT.md)). The mixed-DPI behavior
+ever been moved by it. The Core half compiles and its arithmetic is tested (CI `7aef6ff`, 2026-08-08); no monitor has ever been enumerated. The mixed-DPI behavior
 that motivates the entire design is exactly the class of thing that only a real desktop can confirm,
 which is what [runbooks/manual-validation.md](../runbooks/manual-validation.md) exists for — and that
 runbook has itself never been executed ([TD-9](../TECH_DEBT.md)).

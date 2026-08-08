@@ -1,14 +1,16 @@
 // -------------------------------------------------------------------------------------------------
-// WARNING — NEVER COMPILED. Authored 2026-08-08 in an environment with no .NET SDK. Not one line of
-// C# in this repository has been through a compiler, an analyzer, or a test runner. Treat every
-// signature in this file as a proposal to be verified by the first build, not as working code.
-// See docs/NEXT.md (Active focus) and TD-1 in docs/TECH_DEBT.md.
+// COMPILES, AND IS TESTED. First observed 2026-08-08 at commit 7aef6ff: GitHub Actions built every
+// project on Ubuntu (0 warnings, under TreatWarningsAsErrors) and on Windows, and the Core suites
+// passed — 45 tests, 0 failed, of which 25 exercise this file and the Atlas value types.
 //
-// This file is the concrete proof of the Core/Shell split: it is ordinary arithmetic over values,
-// with no desktop anywhere in it, so it runs and is unit-tested on any operating system. It is also
-// the first thing in this repository that will ever be tested — see the Atlas README.
-// -------------------------------------------------------------------------------------------------
-
+// This file is the concrete proof of the Core/Shell split: ordinary arithmetic over values, with no
+// desktop anywhere in it, so it compiles and runs on Linux CI with no monitor attached — which is
+// exactly what happened.
+//
+// One honest gap, tracked in tests/README.md: the seam test was written AFTER this implementation,
+// so it went green on its first run and has never been observed failing. Substitute a naive
+// per-zone-width implementation and watch it catch the seam before treating it as evidence.
+// A guard nobody has seen fail is decoration.
 namespace Coordinator.Atlas;
 
 /// <summary>Why a template could not be resolved against a work area.</summary>

@@ -111,7 +111,7 @@ first real module is expected to contradict the spec in several places — revis
 moment, in the same session, is the plan and not a failure.
 
 **Specific accuracy debt is already accrued.** Every document written in this pass describes code that
-has never been compiled ([TD-1](../TECH_DEBT.md)). The `audited` flag and the accuracy check exist for
+had never been compiled when this ADR was written ([TD-1](../TECH_DEBT.md); it compiles as of CI `7aef6ff`, 2026-08-08). The `audited` flag and the accuracy check exist for
 exactly the correction pass that the first successful build will force.
 
 **The protocols now bind.** A phase is not done with ERROR-level drift outstanding; a module is not

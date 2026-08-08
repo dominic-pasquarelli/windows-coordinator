@@ -64,7 +64,7 @@ reading. The residual danger is forgetting the gap exists and reading a green ba
 **The bootstrap could not compile a single line.** No .NET SDK existed in the environment where this
 repository was authored, so this stack decision, the project files, and every contract interface are
 text that has never reached a compiler ([TD-1](../TECH_DEBT.md)). Nothing here has been shown to
-build, and the correct phrasing everywhere in this repository is *not compiled*.
+build. **Updated 2026-08-08:** CI at `7aef6ff` compiled every project on Ubuntu and Windows with 0 warnings, so this stack choice is no longer unverified at the compiler level — but no WinUI code exists, so the *UI* half of the decision remains entirely untested (TD-10).
 
 **Every fiddly part of this specific stack is unmeasured.** WinUI 3 does not provide a notification
 area icon, so a tray-resident app needs a Win32 path for the one thing it is most defined by.

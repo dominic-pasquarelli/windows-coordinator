@@ -267,12 +267,16 @@ and every doc that touches build or test status must say so:
 - **The Python tooling is executed and verified.** `tools/coord/coord.py` and the doc-audit checker
   under `tools/doc-audit/` are stdlib-only Python 3.11, and they have actually been run. When
   `coord audit` or `coord map --check` reports a result, that result is real.
-- **The C# has never been compiled.** No .NET SDK has ever been present in the environment this
-  repository was authored in. Not one line of the platform, the pillars, or the Shell has been
-  through a compiler. The correct phrasing everywhere is **"not compiled"** — never "builds," never
-  "works," never "passes." Restoring the toolchain and compiling the skeleton on a Windows machine is
-  the first item in [NEXT.md](NEXT.md), and recording the honest result of that attempt is part of
-  the task.
+- **The C# compiles, and the Core logic is tested — as of 2026-08-08.** GitHub Actions at commit `7aef6ff` (2026-08-08) built every project on **Ubuntu** and on **Windows** — 0 warnings, under `TreatWarningsAsErrors` — and the Core suites passed: **45 tests, 0 failed, 0 skipped** (Atlas 25, Platform 20). No .NET SDK
+  has ever been present in the environment this repository is authored in, so **CI was the first
+  compiler this project ever had**; the first revision of that pipeline skipped the build whenever
+  no solution file existed, which is how a repository can end up carefully documenting an unverified
+  state while the means to verify it sits idle. The lesson is worth more than the fix: *describing a
+  limitation precisely is not the same as removing it*, and it is easy to mistake the first for
+  rigor.
+- **What that still does not license.** No Shell adapter exists, no module exists, and nothing has
+  ever run on Windows. "Compiles" and "the Core tests pass" are now checkable; **"works" is not**,
+  and only [manual-validation.md](runbooks/manual-validation.md) on a real desktop can make it so.
 
 There is a second, structural instance that will outlive the first. Because of the Core/Shell split
 ([COORDINATOR.md](COORDINATOR.md)), a green `coord test` — once a .NET SDK exists to run it — proves

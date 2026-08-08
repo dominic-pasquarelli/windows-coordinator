@@ -51,7 +51,7 @@ Not validated:      <what still needs a real desktop, and why it could not be do
 > desktop, following the runbook, can say that.
 >
 > While no .NET SDK is available, the honest state of the last three boxes is `N/A — no toolchain;
-> nothing has been compiled` (TD-1 in [docs/TECH_DEBT.md](../docs/TECH_DEBT.md)). Write that. Do not
+> no desktop behaviour has been validated` (TD-1/TD-9 in [docs/TECH_DEBT.md](../docs/TECH_DEBT.md)). Write that. Do not
 > leave them blank, and do not tick them.
 
 ## Modularity & docs (the load-bearing parts)

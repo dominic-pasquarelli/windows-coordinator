@@ -21,31 +21,31 @@ related:
 >
 > **One sentence:** this directory holds the small set of types a module talks to and nothing else —
 > the architecture around them is [docs/COORDINATOR.md](../../docs/COORDINATOR.md), the obligations
-> they place on a module are [docs/MODULE_SPEC.md](../../docs/MODULE_SPEC.md), and **none of it has
-> ever been compiled**.
+> they place on a module are [docs/MODULE_SPEC.md](../../docs/MODULE_SPEC.md). It **compiles and is
+> tested**; it **does** nothing yet.
 
-## Status: contract types written, never compiled
+## Status: contract types compile, and the settings/capability logic is tested
 
-The C# in this directory was authored in an environment with **no .NET SDK**. It has never been
-through a compiler, an analyzer, or a test runner; there is no solution file to open it with; no
-project has ever been restored. Every signature here is a **proposal** whose first honest test is
-the first `coord build` on a Windows machine with .NET 9 — the Active focus in
-[docs/NEXT.md](../../docs/NEXT.md), and **TD-1** in
-[docs/TECH_DEBT.md](../../docs/TECH_DEBT.md).
+The C# here was authored without a local .NET SDK, so **CI was its first reader**. It compiles:
+GitHub Actions at `7aef6ff` (2026-08-08) — Ubuntu and Windows, 0 warnings under `TreatWarningsAsErrors` — and `Coordinator.Platform.Core.Tests` passes **20 tests** covering the settings migration
+chain and the capability invariants.
 
-Say "not compiled". Not "builds", not "works", not "passes".
+Nothing here has been compiled on a developer machine (**TD-1** in
+[docs/TECH_DEBT.md](../../docs/TECH_DEBT.md)), and nothing here *does* anything: there is no module
+host, no registry, no settings store implementation, and no process. "Compiles" and "the Core tests
+pass" are the claims available. Not "works".
 
 | | State |
 |---|---|
 | Architecture spine ([docs/COORDINATOR.md](../../docs/COORDINATOR.md)) | **done** |
 | Module contract ([docs/MODULE_SPEC.md](../../docs/MODULE_SPEC.md)) | **done** — and unvalidated by any implementation (**TD-5**) |
-| `src/platform/Coordinator.Platform.Core/` — the contract types | **written, NEVER COMPILED** |
+| `src/platform/Coordinator.Platform.Core/` — the contract types | **compiles** (CI `7aef6ff`) |
 | Module host, registry, lifecycle supervision | **TODO** — not started |
 | Settings store implementation | **TODO** — the interface exists; nothing implements it |
 | Update / delivery channel seam | **TODO** — planned for P1 (**TD-6**) |
 | Logging and diagnostics | **TODO** — not started |
 | Windows adapter for the platform | **TODO** — not created; see below |
-| Core tests | **TODO** — not created |
+| Core tests | **20 passing** — `tests/Coordinator.Platform.Core.Tests` (migration chain, capability invariants) |
 
 ## What is here
 
@@ -57,7 +57,7 @@ Five files, one namespace, no dependencies on anything outside the .NET base lib
 | `IModule.cs` | The lifecycle the host supervises: manifest, declared capabilities, initialise, enable, disable, dispose. |
 | `IModuleContext.cs` | The **only** route from a module to the platform. No statics, no service locator, no ambient globals — which is what makes a module testable with a context of fakes. |
 | `Capability.cs` | The stable id, the typed kind, and the declaration record. The id discipline is stated here because this is where it is enforced. |
-| `Settings.cs` | Versioned settings with an explicit migration hook, and the store that loads and saves them. |
+| `Settings.cs` | Versioned settings, the `ISettingsMigration` chain that runs on the persisted document (ADR 0011), and the store that loads and saves them. |
 
 **Every one of these was kept smaller than the specification describes**, on purpose. The
 capability declaration has no value specification (no minimum, maximum, step, or option list);

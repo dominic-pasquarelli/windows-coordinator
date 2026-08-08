@@ -22,11 +22,20 @@ Two properties are deliberate and load-bearing:
 Stdlib only, Python 3.11+. No pip install, no virtual environment. If you find yourself creating one
 for this repository, something has gone wrong.
 
-Honesty note carried in the code because it is easy to forget: the subcommands that shell out to
-`dotnet` (`test`, `build`, `run`) have **never executed their dotnet path** — no SDK existed where
-this was written (TD-7). Their argument construction and exit-code propagation are unverified. The
-first Windows session should deliberately break a build and confirm `coord build` exits non-zero and
-says so, before trusting the success path.
+Honesty note carried in the code because it is easy to forget, updated 2026-08-08 after the first
+CI run at 7aef6ff:
+
+  * `coord test` HAS executed its dotnet path — GitHub Actions ran it on Ubuntu, where it discovered
+    both Core test projects, ran each individually, and reported 45 passing tests.
+  * `coord build` and `coord run` still have **not** executed their dotnet path. CI builds projects
+    with `dotnet build` directly rather than through this tool, and nothing has ever launched the
+    Shell (there is no Shell project). Their argument construction and exit-code propagation on the
+    SUCCESS path remain unverified (TD-7).
+  * The FAILURE path of all three is verified: with no SDK present each exits 2 with a message that
+    names what is missing, which was checked by hand in the authoring container.
+
+The first Windows session should still deliberately break a build and confirm `coord build` exits
+non-zero and says so, before trusting its success path.
 
 Usage:
   coord test [NAME ...] [--filter EXPR] [-c CONFIG]
@@ -384,8 +393,9 @@ def cmd_run(args) -> int:
         proj = REPO_ROOT / proj
     if proj is None or not proj.exists():
         die("could not find a Shell project to run under src/shell/.\n"
-            "         The WinUI host has not been created yet — no C# in this repository has been\n"
-            "         compiled (TD-1). See src/shell/README.md and docs/NEXT.md.\n"
+            "         The WinUI host has not been created yet — there is no Shell project to run.\n"
+            "         The Core projects compile (CI, 7aef6ff), but nothing here has a UI or a\n"
+            "         process. See src/shell/README.md and docs/NEXT.md.\n"
             "         Point at one explicitly with `coord run --project <path.csproj>`.")
     info(f"launching {rel(proj)}")
     rc = run_cmd([dotnet, "run", "--project", str(proj), "-c", args.configuration],
@@ -601,7 +611,9 @@ CORE_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
        platform-invoke attributes, no Windows or WinUI namespaces, no reference to a Shell project.
        The boundary check reads those as text and fails the gate.
        Shared properties (nullable, LangVersion, warnings-as-errors) come from Directory.Build.props.
-       NOTE: this project file has never been restored or built. -->
+       NOTE: this template's output is checked by tools/coord/tests/test_scaffold.py, which
+       scaffolds a module and asserts every ProjectReference it emits resolves. It has not been
+       compiled — no scaffolded module has ever been built. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -624,7 +636,9 @@ SHELL_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
        behavior does not, and an empty project is a claim.
        Add the Windows App SDK package reference only when this module actually renders its own UI —
        the generic settings page comes free from declared capabilities.
-       NOTE: this project file has never been restored or built. -->
+       NOTE: this template's output is checked by tools/coord/tests/test_scaffold.py, which
+       scaffolds a module and asserts every ProjectReference it emits resolves. It has not been
+       compiled — no scaffolded module has ever been built. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
