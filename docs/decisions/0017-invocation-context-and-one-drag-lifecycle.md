@@ -82,11 +82,26 @@ elevated window may not be resolvable.
 **A cached fact names its publication, not its age.** *The first draft marked a context `ContextStale`
 when the facts' age exceeded a bound, which is wrong for an event-driven record:* `DesktopFacts`
 republishes on change, so an hour-old record on a quiet desktop is perfectly correct and an age
-threshold would eventually refuse every hook gesture *because nothing had gone wrong*. A recent record
-can equally be wrong if a publication was missed. So the context carries `FactsSequence`, staleness is
-a **liveness check on the publisher** (a heartbeat and a monotonic sequence — see
-[CONDUIT §5.5](../CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context)), and correctness
-is established by comparing `TopologyGeneration` against a snapshot rather than by counting ticks.
+threshold would eventually refuse every hook gesture *because nothing had gone wrong*. So the context
+carries `FactsSequence`, and staleness is a **liveness check on the publisher** — a heartbeat and a
+monotonic sequence ([CONDUIT §5.5](../CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context)).
+
+**And the heartbeat re-samples the foreground window, rather than republishing an unchanged record.**
+*The correction to the correction.* Liveness alone leaves the other half of the problem untouched: a
+recent record can be **wrong** if a foreground-change publication was missed, and a heartbeat that
+re-publishes the previous value would advance `Sequence` over that wrong content indefinitely — the
+staleness mechanism attesting to staleness. Re-reading the foreground each interval bounds it:
+
+> **A missed foreground-change publication is repaired within one heartbeat interval**, and each
+> repair is counted, because silent self-healing hides a broken event path.
+
+**Only the foreground, and the asymmetry is the reason.** Correctness for *topology* is checkable
+downstream — `TopologyGeneration` travels on the context, and a module reading a full snapshot
+compares generations and refuses on a mismatch. Correctness for the *foreground* is checkable by
+nobody: there is no generation for it, and a wrong value is indistinguishable from a right one at the
+point of use. **The fact no consumer can validate is the one the publisher must repair.** Enumerating
+monitors on a timer would also mean a full desktop enumeration forever, to catch the case that already
+has a detection path.
 
 **Dispatch stamps `DispatchedAtTicks` and nothing else**, so a module can refuse work that went cold
 in the queue without reading a clock — and without any captured field being rewritten.
@@ -132,8 +147,11 @@ decision removes.
   ADR 0013's swap contract rather than inventing a second way to hand data to the hook thread.
 - **The heartbeat is the part that looks like overhead and is not.** Without it, "nothing changed" and
   "the publisher died" are the same observation, and the only available staleness test is content age
-  — which for an event-driven fact is not a staleness test at all. A timer republishing an unchanged
-  immutable record is a cheap price for making the difference detectable.
+  — which for an event-driven fact is not a staleness test at all.
+- **The heartbeat does real work, which is the point.** One foreground read per interval, on a timer
+  thread, nowhere near the hook path. It buys a bounded repair time for the one field in the record
+  that no consumer can check, and it converts "a missed notification is wrong forever and invisibly"
+  into "wrong for one interval, and counted".
 - **Two contexts of different origins are not interchangeable**, and a module that ignores `Origin`
   will eventually read a null cursor from a schedule tick. Making the origin part of the type is what
   turns that into a compile-time-visible question instead of a null-reference at 2am.
@@ -176,8 +194,15 @@ decision removes.
   positives grow with uptime, which is the worst possible shape for a bug to have.
 - **Poll the desktop on a timer instead of publishing on change**, so the record is always recent.
   Rejected: it burns work continuously to answer a question nobody asked most of the time, and it
-  still cannot promise the record is right at the instant a gesture fires. The heartbeat is the small
-  version of this — it proves the publisher is alive without pretending to be a live read.
+  still cannot promise the record is right at the instant a gesture fires. The re-sampling heartbeat is
+  the bounded version — one field, one call, on an interval — rather than a full enumeration loop.
+- **Heartbeat by republishing the existing record**, proving liveness and nothing more. The first
+  version. Rejected once it was clear a missed foreground notification would then persist forever
+  *with the liveness signal green*: the mechanism would be certifying the exact condition it existed
+  to catch.
+- **Re-sample the whole record on every heartbeat**, monitors included. Correct and disproportionate:
+  a full desktop enumeration on a timer, forever, to repair a fact that already has a downstream
+  detection path in `TopologyGeneration`. Re-sampling is spent only where nobody downstream can check.
 - **Keep both drag streams and define an ordering between them.** Possible, and it means specifying
   cross-stream ordering guarantees for the whole taxonomy to solve one consumer's problem. Collapsing
   to one stream is smaller and removes the question instead of answering it.

@@ -87,7 +87,7 @@ related:
 
 ## Decisions (ADRs)
 
-The unified decision log (20 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
+The unified decision log (21 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
 
 - [ADR 0001 — Adopt the Axon documentation and operating protocols](decisions/0001-adopt-the-axon-documentation-and-operating-protocols.md)
 - [ADR 0002 — C# / .NET 9 and WinUI 3 as the stack](decisions/0002-csharp-dotnet9-and-winui3-as-the-stack.md)
@@ -109,3 +109,4 @@ The unified decision log (20 ADRs) — [docs/decisions/](decisions/). Splitting 
 - [ADR 0018 — Layout editing is three pure operations, and cell ids survive them](decisions/0018-layout-editing-grid-split-merge.md)
 - [ADR 0019 — A layout edit is one transaction over template, occupancy and placement](decisions/0019-layout-edits-are-a-transaction.md)
 - [ADR 0020 — An absent monitor makes a stack dormant, and a displacement degrades to a stack](decisions/0020-dormant-stacks-and-the-displacement-rules.md)
+- [ADR 0021 — A module states a standing request; Conduit computes the grants and keeps recomputing them](decisions/0021-requested-versus-granted-regions.md)

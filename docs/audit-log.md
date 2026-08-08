@@ -26,6 +26,67 @@ related:
 
 ---
 
+## 2026-08-08 — PR #2 round 6: two lifecycle gaps, both "what happens afterwards?"
+
+**Scope:** the `DesktopFacts` publication contract and the pointer-gesture arbitration lifecycle,
+re-read against a review that accepted round 5's four fixes and found each had answered the *steady
+state* while leaving the *recovery* undefined.
+
+**Mechanical result:** `coord audit` 0/0/0 · `coord audit --since origin/main` 0/0/0 ·
+`coord map --check` clean · 11 scaffold tests green. **No C# changed.** Nothing has run on Windows.
+
+### The two
+
+| # | Gap | Landed as |
+|---|---|---|
+| 1 | The heartbeat proved the publisher was **alive** but republished the record unchanged — so a missed foreground notification stayed wrong forever with the sequence advancing normally. The named correctness check, `TopologyGeneration`, only covers *geometry*: foreground can change while topology is identical | The heartbeat **re-samples the foreground** each interval. Guarantee: a missed foreground publication is repaired within one interval, and each repair is **counted** so a broken event path is visible |
+| 2 | A revoked region was never restored. The low-priority module's request was discarded by the refusal, it was told not to retry, and nothing brought the region back when the winner withdrew — so the final armed map depended on history, contradicting the property round 5 had just bought | [ADR 0021](decisions/0021-requested-versus-granted-regions.md) — **requested** and **granted** are separate values, grants are recomputed from `(all requests, priorities)` on every change, and both `RegionsRevoked` and `RegionsRestored` are notified and bump the version |
+
+### The pattern — three rounds, three distinct shapes
+
+Worth recording together, because they are not the same failure and looking for one will not find
+the others:
+
+| Round | Shape | Where it hides |
+|---|---|---|
+| 4 | Prose the **type signature** could not express | In the gap between a description and a declaration on the same page |
+| 5 | A rule contradicted by the **mechanism named elsewhere** | In the join between two documents, or two sections written months apart |
+| 6 | A **steady state defined, a recovery left undefined** | After the last sentence. Nothing contradicts anything — the design simply stops early |
+
+Round 6's shape is the hardest of the three to catch by reading, because there is no contradiction to
+notice. Both gaps read as complete and were: complete descriptions of the *first* transition. The
+question that finds them is **"and then what?"** — asked of every state a design introduces. What
+happens after the heartbeat proves liveness on wrong content? After a region is taken and the taker
+leaves?
+
+**A lens-D addition earned by this round:** for every new state or transition, ask what returns the
+system to the previous state, and whether anything triggers it. A one-way transition is a design that
+works once.
+
+### The self-check both fixes now carry
+
+Each gap also produced a guard whose *proof* had to be specified, because both are the kind that can
+be implemented as decoration:
+
+- **The heartbeat's repair path** — suppress a foreground-change notification, advance exactly one
+  heartbeat, assert the published foreground matches reality and the missed-notification counter
+  moved. Run against a build whose heartbeat republishes unchanged and it must go red.
+- **Arbitration by permutation, including the full lease cycle** — low requests · high preempts ·
+  high withdraws · low regains automatically, in every order, same final map. A permutation test
+  *without* the withdraw step passes under the design ADR 0021 replaced, which is precisely why the
+  round-5 version of this test would not have caught the gap it was written to prevent.
+
+That second one is its own small lesson: **a permutation test is only as good as the operations it
+permutes.** Round 5 specified permutation and still missed the defect, because the operation set did
+not include a winner leaving.
+
+### Still owed
+
+- P1 and P2 before any Zones code. `Z-1`…`Z-6` remain written and never executed.
+- Six review rounds have improved the specification and moved the implementation not at all.
+
+---
+
 ## 2026-08-08 — PR #2 round 5: four contradictions between a rule and its own mechanism
 
 **Scope:** the two pillar contracts and the Zones designer, re-read against a review that found four

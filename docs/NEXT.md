@@ -82,8 +82,8 @@ are resuming and the run was green, say so with the date; if it was red, the err
 
 **What does not exist — and this is the part that matters now that it compiles.** There is **no
 module code.** Zones (M1) is now **fully designed** —
-[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0020
-settle its nine non-obvious decisions — but not one line of it is written, and its code projects are
+[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0021
+settle its ten non-obvious decisions — but not one line of it is written, and its code projects are
 deliberately not scaffolded. Chrono (M2) is still a roadmap entry only. There is **no Shell adapter**, so
 not one line of Windows-facing code exists in this repository. There is **no solution file** (`.sln`
 files carry GUIDs that cannot be verified in a container; generating it is step 2 below).
@@ -248,9 +248,10 @@ DPI is closed by the runbook or it is not closed.
 The first real module and the first outside consumer of both pillars. **Fully designed** — read
 [src/modules/zones/docs/ARCHITECTURE.md](../src/modules/zones/docs/ARCHITECTURE.md) before writing a
 line, and note that Zones needs extensions from both pillars which are specified but unbuilt:
-**Conduit** gains the pointer-gesture kind and its arbitration (ADR 0013) and the recognition-time
-invocation context (ADR 0017); **Atlas** gains explicit raise/show/activate (ADR 0014) and the
-published `DesktopFacts` record that hook-thread capture reads.
+**Conduit** gains the pointer-gesture kind (ADR 0013), its request-vs-grant arbitration with
+automatic restoration (ADR 0021), and the recognition-time invocation context (ADR 0017); **Atlas**
+gains explicit raise/show/activate (ADR 0014) and the published `DesktopFacts` record — with a
+heartbeat that **re-samples the foreground** — that hook-thread capture reads.
 
 **Pure logic first, placement second, Windows last** — the ordering is deliberate: the interesting
 parts are pure and host-testable, so proving them before any window moves means that when placement
@@ -270,10 +271,11 @@ misbehaves you already know the model is not the cause.
    assertion passes while the windows sit at the old size. Pure arithmetic, no UI, no desktop.
 2. **Armed-region computation**, with the test that a zone leaves the armed set the moment its depth
    drops below two — the test that stops `Win`+wheel swallowing scroll over ordinary windows — and the
-   refusal path (previous set stays active · subtraction retry accepted · empty set always accepted),
-   which is what §7.3's recovery is built on. Then the **revocation** handler: a grant is a lease, so
-   a higher-priority module can take a region mid-session and Zones must mark those zones un-cyclable
-   **without republishing** (§7.4).
+   grant lifecycle in **both** directions (ADR 0021): a contested publication is accepted and reports
+   what was granted; `RegionsRevoked` marks those zones un-cyclable **without republishing**; and
+   `RegionsRestored` marks them cyclable again when the higher-priority module withdraws (§7.4).
+   Testing only revocation passes on the half-implementation whose failure is a feature that never
+   comes back.
 3. **Settings shape** and its migration path, before any UI.
 4. **The Atlas raise path** (ADR 0014) and manual-validation `Z-4` — *do this early*. The foreground
    lock is the module's largest unknown and among the cheapest to resolve; the design already

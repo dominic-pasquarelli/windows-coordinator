@@ -9,6 +9,7 @@ related:
   - src/modules/zones/docs/ARCHITECTURE.md
   - docs/decisions/0019-layout-edits-are-a-transaction.md
   - docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md
+  - docs/decisions/0021-requested-versus-granted-regions.md
   - docs/MODULE_SPEC.md
   - docs/ATLAS.md
   - docs/CONDUIT.md
@@ -32,7 +33,7 @@ Nothing in this directory is implemented. What exists is the design —
 | | State |
 |---|---|
 | Internal design ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | **done** — addressing, occupancy and member states, dormancy, stacking, cycling, reconciliation, the layout designer, dragons |
-| Decisions (ADR 0012 – 0020) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing, edits as a transaction, dormancy and displacement |
+| Decisions (ADR 0012 – 0021) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing, edits as a transaction, dormancy and displacement, region request-vs-grant |
 | `Coordinator.Zones.Core` | **TODO** — not created. `coord new-module zones` adds it around these docs |
 | `Coordinator.Zones.Shell` (the drag overlay) | **TODO** — not created |
 | Core tests | **TODO** — not created |
@@ -86,12 +87,12 @@ forces, is [ARCHITECTURE §3](docs/ARCHITECTURE.md#3-cycling-and-the-gesture-pro
 2. [docs/MODULE_SPEC.md](../../../docs/MODULE_SPEC.md) — the contract every module implements.
 3. [docs/ATLAS.md](../../../docs/ATLAS.md) and [docs/CONDUIT.md](../../../docs/CONDUIT.md) — the two
    pillars Zones is built on. Zones needs several extensions from each — zone addressing and
-   durable monitor keys, z-order, `Show`, the pointer-gesture kind, and the invocation context —
-   all specified in ADRs 0013–0017.
+   durable monitor keys, z-order, `Show`, the pointer-gesture kind, the invocation context, and
+   region arbitration — specified in ADRs 0013–0017 and 0021.
 
 ## Decisions that shaped this module
 
-The unified log is [`docs/decisions/`](../../../docs/decisions/). The nine that govern Zones:
+The unified log is [`docs/decisions/`](../../../docs/decisions/). The ten that govern Zones:
 
 - **[ADR 0012](../../../docs/decisions/0012-zones-stacking-model.md)** — a zone holds an ordered
   stack; stacking is z-order; membership is intent reconciled against the desktop; stacks are
@@ -117,6 +118,9 @@ The unified log is [`docs/decisions/`](../../../docs/decisions/). The nine that 
 - **[ADR 0020](../../../docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md)** — an
   absent monitor makes a stack dormant rather than unassigned, and a refused displacement degrades to
   a stack rather than an orphan.
+- **[ADR 0021](../../../docs/decisions/0021-requested-versus-granted-regions.md)** — Conduit keeps a
+  module's *requested* regions separate from its *granted* ones, so contention is arbitrated rather
+  than refused and a preempted region returns automatically when the winner withdraws.
 
 ## Where to resume
 
@@ -136,9 +140,10 @@ Then, in order:
 
 1. **Armed-region computation**, with the test that a zone leaves the set when its depth drops below
    two. That test is what stops `Win`+wheel swallowing scroll events over ordinary windows. Then the
-   refusal path — a refused publication leaves the previous set active, and the empty set is always
-   accepted — because §7.3's recovery is built on that guarantee and a guarantee nobody has seen hold
-   is decoration.
+   grant lifecycle in **both** directions — a partial grant marks the withheld zones, a revocation
+   marks them un-cyclable without republishing, and a restoration marks them cyclable again. A suite
+   covering only revocation passes on the half-implementation whose failure is a feature that never
+   comes back.
 2. **The Atlas raise path** (ADR 0014) and manual-validation row `Z-4` — the foreground lock is the
    module's largest unknown and the cheapest thing to find out. Do it before building the overlay,
    not after: if activation is refused in a way that cannot be worked around, the *design* absorbs it

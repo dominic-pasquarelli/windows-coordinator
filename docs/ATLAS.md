@@ -170,19 +170,32 @@ topology changes. Publication is an atomic reference swap under
 [CONDUIT §3.6](CONDUIT.md#36-pointer-gesture)'s contract, so the hook thread's read is a reference
 load with a known worst case.
 
-**Atlas also heartbeats it**, republishing on a fixed interval with a bumped sequence even when
-nothing has changed. That is the one part of this that is not obvious, and it exists because
-`DesktopFacts` is **event-driven**: on a desktop nobody is touching, a record can be an hour old and
-completely correct, so *age cannot be the staleness test*. Without a heartbeat there is no way to
-distinguish "nothing has changed" from "Atlas stopped publishing", and any age threshold would
-eventually reject every hook gesture on a stable desktop — the feature failing *because* things were
-calm.
+**Atlas also heartbeats it**, on a fixed interval, and the heartbeat **re-samples the foreground
+window** rather than republishing the previous record. Both halves of that matter, for different
+reasons:
+
+- **Publishing on an interval at all** exists because `DesktopFacts` is event-driven: on a desktop
+  nobody is touching, a record can be an hour old and completely correct, so *age cannot be the
+  staleness test*. Without a heartbeat, "nothing has changed" and "Atlas stopped publishing" are the
+  same observation, and any age threshold would eventually reject every hook gesture on a stable
+  desktop — the feature failing *because* things were calm.
+- **Re-sampling** exists because a liveness-only heartbeat would keep certifying a **wrong** record as
+  live. If a foreground-change notification is ever missed, a heartbeat that republishes the previous
+  value advances the sequence forever over stale content. Re-reading the foreground bounds that: a
+  missed publication is repaired within one interval, and Atlas **counts** each repair, because
+  self-healing with no trace hides a broken event path.
+
+**Only the foreground is re-sampled, and the asymmetry is the argument.** Reading it is one call;
+enumerating monitors is what a snapshot is for. More importantly, a consumer *can* detect a missed
+topology update — `TopologyGeneration` travels on the context and a snapshot read compares it — and
+*cannot* detect a wrong foreground by any means. **The fact nobody downstream can validate is the one
+the publisher has to repair.**
 
 **This is §4's rule about snapshots, applied to a second surface.** A snapshot is stamped but never
-self-aging, and freshness is computed by the reader; here the producer likewise never asserts
-"this is fresh". It asserts *which publication this is* and *that publication is still running*.
-What establishes correctness is the reader comparing `TopologyGeneration` against a snapshot — not a
-tick count ([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
+self-aging, and freshness is computed by the reader; here the producer likewise never asserts "this is
+fresh". It asserts *which publication this is*, *that publication is still running*, and — for the one
+field nobody else can check — *that it was actually looked at this interval*
+([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
 
 The two paths answer different questions and the difference is deliberate: a point sample is *live but
 only where it is safe to take one*; the published record is *safe to read anywhere, and identified by

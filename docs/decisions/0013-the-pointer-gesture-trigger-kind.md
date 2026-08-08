@@ -1,7 +1,7 @@
 # ADR 0013 — A sixth Conduit trigger kind: the pointer gesture, decided from pre-resolved regions
 
 Date: 2026-08-08
-Status: Accepted · Extended same day after review of PR #2 — the update, revocation, queue and token contract is in [CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)
+Status: Accepted · Extended after review of PR #2 — the update, revocation, queue and token contract is in [CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture) · **Arbitration corrected by [ADR 0021](0021-requested-versus-granted-regions.md)**: contention is arbitrated rather than refused, Conduit keeps *requested* separate from *granted*, and a revoked region is restored automatically
 
 ## Context
 
@@ -55,7 +55,7 @@ they change. Conduit stores them. The hook does a rectangle test and nothing els
 
 | Required | This kind |
 |---|---|
-| **Refusal reasons** | `RegionsOverlapAnotherOwner` (a **higher**-priority module holds an intersecting region with the same modifier; the refusal **names the contested rectangles**) · `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded) |
+| **Refusal reasons** | `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded). **Contention is not among them** — an overlapping request is accepted and arbitrated, and the result reports which rectangles were granted ([ADR 0021](0021-requested-versus-granted-regions.md)) |
 | **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide. **Who wins is explicit user priority, then stable module id** — never registration order. A grant is a **revocable lease**: a higher-priority claim preempts and the incumbent is told (`RegionsRevoked`); a lower-priority claim is refused ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)) |
 | **Dispatch class** | Hook for the *decision*; the **dispatch runs on a worker**. The hook's entire job is: test, swallow-or-pass, queue |
 | **Guarantee statement** | Delivered as a discrete event carrying the capability id, the **matched zone token**, the **region-set version** it matched under, and a tick delta. **Coalesced** under load, keyed on `(intent, zone token)`. **Not** guaranteed: one dispatch per physical detent, ordering against other input kinds, or delivery at all when the queue is saturated — a dropped cycle tick is a cosmetic loss, and pretending otherwise would mean buffering on the hook path |
@@ -117,12 +117,17 @@ broken.
   Those two sentences cannot both be true:* if the incumbent always keeps it, the winner is whoever
   published first, and the priority order does nothing. So a higher-priority claim **revokes** the
   overlapping part of a lower-priority lease and the loser is **told** (`RegionsRevoked`, dispatched on
-  a worker). The property that matters is that the resulting armed map is a pure function of the
-  current request set and the priority order — publish order changes which *path* is taken (refuse
-  then retry, or grant then revoke) and never which module ends up holding the rectangle.
-- **A module can therefore lose regions it was using.** That is the cost, and it is why the
-  notification is part of the contract rather than a courtesy: a feature built on armed regions must
-  degrade when they are taken, not assume it keeps them.
+  a worker).
+- **And a lease that is only ever taken has the same defect one step further on.**
+  [ADR 0021](0021-requested-versus-granted-regions.md) is the second correction: Conduit keeps each
+  module's **requested** set separately from its **granted** set and recomputes grants from
+  `(all requests, priorities)` on every change, so a region comes back automatically when the
+  higher-priority owner withdraws. Without that, "the armed map is a pure function of the current
+  request set" is still false — it depended on whether a preemption had ever happened.
+- **A module can therefore lose regions it was using, and get them back without asking.** That is the
+  cost and the payoff, and it is why both notifications are part of the contract rather than a
+  courtesy: a feature built on armed regions must degrade when they are taken *and recover when they
+  return*, or it shows a dead affordance that has quietly been working again for an hour.
 
 ## Alternatives considered
 

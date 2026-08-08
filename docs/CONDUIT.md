@@ -256,9 +256,10 @@ hook does an early-out on the modifier, then a bounded rectangle test, then swal
 dispatch runs on a worker; the hook's whole job is *test, decide, queue*.
 
 **Conflicts are geometric, not modifier-wide.** Two intents collide only when their modifier matches
-**and** their regions intersect — two modules arming disjoint regions with the same modifier is the
-normal case, not a conflict. Refusals: `RegionsOverlapAnotherOwner`, `ModifierReserved`,
-`TooManyRegions`.
+**and** their regions intersect — two modules requesting disjoint regions with the same modifier is
+the normal case, not a conflict. A collision is **arbitrated by priority, not refused** (§3.6.1);
+the refusals are `ModifierReserved` and `TooManyRegions`, which are malformed and over-quota requests
+rather than contention.
 
 **Fail open, always.** Empty region set, unknown modifier state, saturated queue — pass the event
 through untouched. A dropped cycle tick is cosmetic; a swallowed scroll is a desktop that feels
@@ -299,13 +300,13 @@ constantly — every layout change, every stack that crosses depth two. So:
 
 | Question | Answer |
 |---|---|
-| A new set overlaps a **higher**-priority owner | The **update is refused** (`RegionsOverlapAnotherOwner`), **naming the contested rectangles** |
-| A new set overlaps a **lower**-priority owner | The update is **granted**, and the incumbent's lease over the contested rectangles is **revoked and the revocation delivered to it** — never silently |
-| Is a refusal ever partial | **No.** A set is accepted whole or refused whole. A silently-trimmed set would leave a module believing it armed regions it does not own |
-| What happens to the previous set after a refusal | **It stays active.** Silently disarming on a failed update would break cycling with no signal — the module would believe it had regions and have none |
-| Who wins an overlap | **Explicit user priority, then stable module id** — see below. Never "whoever got there first" |
-| How an owner gives up a region | By updating, by unregistering, **or by being revoked by a higher-priority claim** |
-| Can **withdrawing** be refused | **Never.** Publishing a set that is a subset of one you already own, or the empty set, always succeeds — see *withdrawal always succeeds* below |
+| A publication overlaps **any** other owner | **Accepted.** Contention is arbitrated, not refused. The request is recorded whole; the **grant** is whatever arbitration awards, and the result reports it explicitly |
+| Is a grant ever partial | **Yes** — and it is always *reported*. What is forbidden is silent trimming, not partial granting: a module must never have to infer what it holds |
+| What can still refuse a whole publication | `ModifierReserved` and `TooManyRegions` — malformed or over-quota requests, which are errors rather than contention |
+| Who wins a contested rectangle | **Explicit user priority, then stable module id** — see below. Never "whoever got there first" |
+| How an owner loses a region | By reducing its own request, by unregistering, **or by arbitration awarding it to a higher-priority requester** |
+| How an owner **regains** one | **Automatically**, when the higher-priority requester withdraws, unregisters or loses priority. The module does not re-publish and must not — see §3.6.1 |
+| Can **withdrawing** be refused | **Never.** Publishing a set that adds nothing you did not already request, or the empty set, always succeeds |
 | Where the topology generation comes from | **Atlas**, carried on the set by the publishing module, which got it from the snapshot it computed against. Conduit compares it with the generation it last observed from Atlas |
 
 #### Stable priority — why "earlier registration wins" is not good enough
@@ -334,49 +335,77 @@ claimed to replace, one level down. *An earlier draft of this section asserted b
 paragraph is the retraction.*
 
 So a grant is a **lease**, in the sense the [Core/Shell table](#6-the-coreshell-split-applied-here)
-already gives Conduit, and preemption is real:
+already gives Conduit, and preemption is real.
 
-- A publication from a **higher**-priority module over a contested rectangle **succeeds**, and the
-  incumbent's lease over exactly those rectangles is revoked.
-- **Revocation is delivered, never silent.** The preempted module receives a `RegionsRevoked`
-  notification naming the rectangles it lost — an ordinary dispatch on a worker, not on the hook
-  thread. Conduit replaces that module's armed set with the surviving subset, which is safe precisely
-  because a subset publication is the one thing that can never be refused.
-- A publication from a **lower**-priority module over a contested rectangle is **refused**, naming the
-  rectangles, and the module takes the subtraction path below.
+### 3.6.1 Requested and granted are two different values
 
-**The property this buys, and the reason it is the right shape:** the armed map is a **pure function
-of the current request set and the priority order**, with arrival order nowhere in it. Whether the
-high-priority module publishes before or after the low-priority one, the same module ends up holding
-the rectangle — refused-then-retried in one order, granted-then-revoked in the other. Two runs of the
-same configuration arm identically, which is the whole point of replacing "first wins".
+A lease that is only ever *taken* has the same defect one level further on, and it took a second
+review to see it. If Conduit forgets what a preempted module asked for, then when the winner later
+withdraws nothing brings the region back — and the final armed map depends on the sequence of events
+rather than on the current state. So Conduit keeps **two values per owner**
+([ADR 0021](decisions/0021-requested-versus-granted-regions.md)):
 
-The cost is honest: a module can lose a region it was using, at a moment it did not choose. That is
-what makes the notification load-bearing rather than courteous — a module must handle `RegionsRevoked`
-as a real state change, and a feature built on armed regions has to degrade gracefully when they are
-taken away. Zones' version of that is
-[ARCHITECTURE §7.3](../src/modules/zones/docs/ARCHITECTURE.md#73-applying-an-edit).
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record RegionOwner(
+    ModuleId Module,
+    int Priority,                 // explicit user setting; ties break on ModuleId
+    ArmedRegionSet Requested,     // the module's standing desire — changes only when it publishes
+    ArmedRegionSet Granted,       // Conduit's current answer — changes when anything changes
+    int GrantVersion);            // bumped on EVERY change to Granted
+```
+
+**Grants are recomputed in full, never patched:**
+
+```
+grants = arbitrate(every owner's Requested, priority order)
+```
+
+— re-run whenever a module publishes, a module registers or unregisters, or **a priority setting
+changes**. No previous grant map is an input, and arrival order appears nowhere in the computation.
+
+**Both transitions are notified, and both bump `GrantVersion`:**
+
+| Notification | When |
+|---|---|
+| **`RegionsRevoked`** | a higher-priority requester now wants rectangles this owner held |
+| **`RegionsRestored`** | the higher-priority requester withdrew, unregistered, or lost priority, and these rectangles come back |
+
+Both are ordinary worker dispatches, never hook-thread work. **The version bump on *restoration* is as
+load-bearing as the one on revocation:** a gesture recognized under the old lease and still queued must
+not execute against an arbitration state that has since changed, and "changed back" is still changed.
+
+**A module never re-publishes to regain a region**, and must not try. Its request never went away;
+restoration is Conduit's job. A module that re-requests on revocation is fighting the user's own
+priority setting, and it cannot win.
+
+**Now the property is actually true:** `grants = f(requests, priorities)`, with history nowhere in it.
+Publish order changes which notifications fire, never which module ends up holding what — including
+across a full preempt-then-withdraw cycle, which is the case the previous design got wrong.
+[§5.4](#54-proving-the-guard-not-asserting-it) requires the permutation test to include exactly that
+cycle.
+
+The cost is honest, and it is two things. Conduit now stores rectangles a module is **not** currently
+granted, bounded by the same per-module cap that bounds the hook test. And a module must handle
+regions **arriving** as well as leaving — slightly more surface, and the alternative is a permanently
+greyed-out affordance that has actually been available for an hour. Zones' side is
+[ARCHITECTURE §7.4](../src/modules/zones/docs/ARCHITECTURE.md#74-losing-and-regaining-a-region).
 
 #### Withdrawal always succeeds
 
-Arming is a request. **Disarming is not** — a module may always publish a set that adds no rectangle
-it did not already own, and the empty set is always accepted. Without this rule a module can get
-stuck holding regions it has decided are wrong, and there is no safe state to fall back to.
+Arming is a request that arbitration answers. **Disarming is not a request at all** — a module may
+always publish a set that adds no rectangle it did not already request, and the empty set is always
+accepted. Without this rule a module can get stuck holding regions it has decided are wrong, with no
+safe state to fall back to.
 
-It is also what makes **revocation** implementable: Conduit trimming a preempted module's set to the
-surviving subset is a withdrawal-direction change, so it can never itself be refused, and there is no
-state in which a revocation gets stuck half-applied.
+It is also what keeps §3.6.1's recomputation total: shrinking a request can never fail, so a module
+withdrawing is always able to complete, and the grant map that follows is always computable.
 
-This is what makes a refused update recoverable rather than a dead end. The refusal names the
-contested rectangles, so the retry is a subtraction rather than a search:
-
-> **publish** → refused, with the contested rectangles → **publish the same set minus those**
-> (accepted; it adds nothing contested) → if that is somehow refused too, **publish the empty set**
-> (always accepted).
-
-Two steps, terminating, and every outcome is a state the module can describe. The cost is honest and
-local: cycling is unavailable on the contested zones, and the module knows exactly which, so it can
-say so instead of appearing broken. A consumer's version of this is
+**With contention arbitrated rather than refused, publishing is one step.** A module publishes what it
+wants and is told what it was granted; if part is withheld, the result says which rectangles and the
+module reports that surface as unavailable. There is no retry loop to bound and no question of how
+many attempts to make — *an earlier draft specified a two-step subtraction retry, which existed only
+to work around contention being a refusal.* The consumer's side is
 [Zones ARCHITECTURE §7.3](../src/modules/zones/docs/ARCHITECTURE.md#73-applying-an-edit).
 
 #### The queued event carries a token, not coordinates
@@ -539,10 +568,19 @@ advance so it does not get negotiated later:
   and the context must **not** be `ContextStale` — that is the assertion the rejected age-threshold
   design would fail, and without it nothing distinguishes a liveness check from the age check it
   replaced. Then the publisher stops and the same elapsed time must produce `ContextStale`.
-- **Arbitration determinism (§3.6) is tested by permutation, not by example.** The same set of region
-  requests is published in several different orders and the resulting armed map must be identical
-  every time. A single-order test passes just as happily under "first wins", so it proves nothing
-  about the property that was actually bought.
+- **The heartbeat's repair path gets a test that suppresses an event**, because a self-healing
+  mechanism that is never observed healing is indistinguishable from one that does not work. Drive a
+  fake desktop source: change the foreground **with its change notification suppressed**, assert the
+  published record is now wrong, advance exactly one heartbeat, and assert the published foreground
+  **matches reality** and the missed-notification counter moved. Run the same test against a build
+  whose heartbeat republishes the previous record unchanged — the shape the first draft specified —
+  and it must go red.
+- **Arbitration determinism (§3.6) is tested by permutation, not by example**, and the permutation
+  must include a **full lease cycle**: low priority requests a region · high priority preempts it ·
+  high priority withdraws · low priority **regains it automatically**. Then the same operations in
+  every other order, all ending in the identical armed map. A permutation test without the withdraw
+  step passes under the design [ADR 0021](decisions/0021-requested-versus-granted-regions.md)
+  replaced, because that design's defect only appears once a winner leaves.
 - **Latency itself cannot be tested this way**, and pretending otherwise would be the exact failure
   §7 names. Actual hook latency is a [manual-validation](runbooks/manual-validation.md) row, measured
   on a real desktop, recorded with a date and a machine. No Core test result may ever be described as evidence about it.
@@ -650,18 +688,49 @@ So the staleness test is a **liveness check on the publisher, not an age check o
 
 | Mechanism | What it establishes |
 |---|---|
-| **Heartbeat.** Atlas republishes on a fixed interval even when nothing changed, bumping `Sequence` and `HeartbeatAtTicks` | Separates *"nothing has changed"* from *"the publisher has died"* — the two states an age threshold cannot tell apart |
+| **Heartbeat.** Atlas **re-samples the foreground window and republishes** on a fixed interval, even when no change notification arrived, bumping `Sequence` and `HeartbeatAtTicks` | Separates *"nothing has changed"* from *"the publisher has died"* — and **repairs** a missed foreground update rather than certifying it |
 | **`Sequence` is monotonic and gap-free** | A reader that sees it stop advancing across heartbeat intervals knows publication has stopped, whatever the content says |
 | **`ContextStale` fires on missed heartbeats only** — `now - HeartbeatAtTicks` beyond a small multiple of the interval | The refusal now means *"Atlas stopped publishing"*, which is a genuine fault, rather than *"the desktop has been quiet"*, which is not |
 
 > **Content age is never, on its own, a refusal reason.** An unchanged event-driven fact does not
 > decay.
 
-**And the missed-update case is answered by validation, not by timing.** `TopologyGeneration` travels
-on the context, so a module that goes on to read a full Atlas snapshot compares generations and
-refuses on a mismatch — which catches a wrong record regardless of how new it was. That is the check
-that actually establishes correctness; the heartbeat only establishes that someone is still
-publishing.
+#### The heartbeat re-samples; it does not rubber-stamp
+
+**A heartbeat that republishes the previous record unchanged is worse than no heartbeat**, and this is
+the subtlest thing in the section. If a foreground-change notification is missed — the event path
+hiccups, a notification is coalesced away, the subscription drops and re-establishes — then a
+liveness-only heartbeat keeps advancing `Sequence` on a record whose foreground is **wrong**, and it
+does so forever. The mechanism built to detect staleness would be actively attesting to it.
+
+So each heartbeat **re-reads the current foreground window** before publishing. A missed notification
+is therefore corrected within one interval, which turns an unbounded, undetectable error into a
+bounded one:
+
+> **Guarantee.** A missed foreground-change publication is repaired within one heartbeat interval.
+
+**When a heartbeat finds a foreground it was not told about, that is counted**, not silently fixed.
+Self-healing that leaves no trace hides a broken event path — the repair works, nobody learns the
+subscription is failing, and the counter is the only thing that distinguishes "healthy" from "quietly
+running on the fallback".
+
+**Why foreground and not the whole record.** Reading the foreground window is one call. Enumerating
+monitors is what a *snapshot* is for, and putting it on a timer would burn a full desktop enumeration
+forever to catch an event that has its own detection path. The asymmetry is not laziness, it is the
+difference in what a consumer can check:
+
+| Fact | Can a consumer detect a missed update? |
+|---|---|
+| **Monitor geometry / topology** | **Yes** — `TopologyGeneration` travels on the context, and a module that reads a full snapshot compares generations and refuses on a mismatch |
+| **Foreground window** | **No.** There is no generation to compare and nothing to compare it against; a wrong foreground is indistinguishable from a right one at the point of use |
+
+**The fact a consumer cannot validate is the one the publisher must repair.** That is the whole
+argument for re-sampling exactly this field.
+
+*The first version of this decision described the heartbeat as republishing an unchanged immutable
+record, and pointed at the generation comparison as the correctness check for everything. The
+generation comparison covers geometry only — foreground can change while topology is identical — so a
+missed foreground update would have stayed wrong indefinitely with the sequence advancing normally.*
 
 #### Facts that are unavailable are null, and facts that are cached say when
 
