@@ -698,6 +698,31 @@ namespace Coordinator.{cls};
 """
 
 
+# Files a design-first module is allowed to already contain. Everything else blocks the scaffold —
+# see the note in cmd_new_module. Kept as an explicit allow-list because the failure mode of a
+# deny-list is that a file type nobody thought of is silently treated as documentation.
+DOC_ONLY_EXACT = {"README.md", ".gitkeep", ".gitignore"}
+DOC_ONLY_DOCS_SUFFIXES = {".md", ".png", ".svg"}
+IGNORED_DIRS = {"bin", "obj", ".vs", "__pycache__"}
+
+
+def _non_documentation_files(root: Path) -> list[Path]:
+    """Existing files under `root` that are not part of the documentation-only shape."""
+    if not root.exists():
+        return []
+    out: list[Path] = []
+    for f in sorted(root.rglob("*")):
+        if f.is_dir() or any(part in IGNORED_DIRS for part in f.parts):
+            continue
+        r = f.relative_to(root)
+        ok = (r.as_posix() in DOC_ONLY_EXACT
+              or f.name in DOC_ONLY_EXACT
+              or (r.parts[:1] == ("docs",) and f.suffix.lower() in DOC_ONLY_DOCS_SUFFIXES))
+        if not ok:
+            out.append(f)
+    return out
+
+
 def cmd_new_module(args) -> int:
     """Scaffold a module: one directory, the two projects, the tests project, and the docs.
 
@@ -727,18 +752,22 @@ def cmd_new_module(args) -> int:
     # load it did not exist. So a directory holding only documentation is not "an existing module"
     # to be protected from; it is the normal state of a module the day before its first line of C#.
     #
-    # The thing actually worth refusing is clobbering CODE. Refuse when any project file exists;
-    # otherwise fill in the missing pieces and leave every existing file untouched.
-    existing_projects = sorted(mod_dir.rglob("*.csproj")) if mod_dir.exists() else []
-    if existing_projects:
-        die(f"{rel(mod_dir)} already contains {len(existing_projects)} project file(s) — refusing "
-            "to overwrite an existing module.\n"
-            f"         First: {rel(existing_projects[0])}\n"
-            "         If you meant to start over, move or delete it yourself; a scaffold that can\n"
-            "         silently clobber work is a scaffold nobody can trust.")
-    if test_dir.exists() and any(test_dir.rglob("*.csproj")):
-        die(f"{rel(test_dir)} already contains a project file — refusing to overwrite it.")
-    if mod_dir.exists():
+    # But "documentation only" must be an ALLOW-LIST, not "contains no .csproj". The first version
+    # of this guard tested for the absence of a project file, which quietly accepted a directory
+    # holding orphan .cs, .xaml, .resx or a half-written anything — and then printed "holds
+    # documentation only" while scaffolding around real work. A guard whose predicate is broader
+    # than its claim is the same defect as a check that cannot fail: it passes for reasons its own
+    # message does not admit. Reported in review of PR #2.
+    blockers = _non_documentation_files(mod_dir) + _non_documentation_files(test_dir)
+    if blockers:
+        listed = "\n".join(f"           {rel(b)}" for b in blockers[:8])
+        more = f"\n           … and {len(blockers) - 8} more" if len(blockers) > 8 else ""
+        die(f"refusing to scaffold: {len(blockers)} existing file(s) are not documentation.\n"
+            f"{listed}{more}\n"
+            "         A docs-only module (README.md, docs/*.md) is filled in around; anything\n"
+            "         else is work this tool must not touch. Move or delete it yourself — a\n"
+            "         scaffold that can silently clobber work is a scaffold nobody can trust.")
+    if mod_dir.exists() or test_dir.exists():
         info(f"{rel(mod_dir)} exists and holds documentation only — adding the code projects "
              "around it, leaving every existing file untouched.")
 
@@ -764,9 +793,10 @@ def cmd_new_module(args) -> int:
             "the module must remain useful when refused."),
         core_dir / f"{cls}Settings.cs": _cs_placeholder(
             cls, name, "Settings",
-            "The versioned settings record. Every field has a default so old settings still load "
-            "(additive by default); structural changes get an explicit Migrate() plus a test that "
-            "fails without it. A reset is only ever explicit."),
+            "The versioned settings record carrying SchemaVersion. Every field has a default so old "
+            "settings still load (additive by default). A STRUCTURAL change ships an "
+            "ISettingsMigration that rewrites the persisted JSON before it is deserialized "
+            "(ADR 0011), plus a test observed failing without it. A reset is only ever explicit."),
         shell_dir / f"Coordinator.{cls}.Shell.csproj": SHELL_CSPROJ.replace("{cls}", cls),
         test_dir / f"Coordinator.{cls}.Core.Tests.csproj":
             TESTS_CSPROJ.replace("{cls}", cls).replace("{name}", name),

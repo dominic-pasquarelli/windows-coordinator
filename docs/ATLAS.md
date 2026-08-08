@@ -123,6 +123,45 @@ differently wrong.
 
 ---
 
+### 3.1 Two monitor identifiers, and they are not interchangeable
+
+| | `MonitorId` | `MonitorKey` |
+|---|---|---|
+| Scope | one snapshot / topology generation | across restarts, docks, driver updates |
+| Derived from | whatever the enumeration returned | display device path plus EDID identity |
+| Use for | lookup **within** a snapshot | **anything persisted** |
+
+**Nothing persists a `MonitorId`.** A settings file keyed on a snapshot-local handle is a settings
+file whose keys stop meaning anything after a reboot, and the failure is silent — layouts simply stop
+applying, or apply to the wrong screen.
+
+A `MonitorKey` carries its **confidence**: `Stable` when EDID gives a serial, `Positional` when it
+does not and the key falls back on connector position (which a cable swap invalidates). Two identical
+monitors with no serial are genuinely indistinguishable, so a consumer matching a `Positional` key
+may be wrong — and the contract is that it **says so and falls back** rather than guessing.
+([ADR 0015](decisions/0015-zone-addressing-and-durable-monitor-identity.md))
+
+### 3.2 Windows are ordered front-to-back
+
+`DesktopSnapshot.Windows` is in **z-order, frontmost first**. This is a real property of the platform
+enumeration rather than a computation, and it is what lets a consumer answer "which of *these* windows
+is on top" — the question a stacking module has to ask after the user clicks a taskbar button, and
+which is otherwise unanswerable without caching state the OS already owns.
+
+### 3.3 The cursor and the foreground window are desktop facts too
+
+Both are defined here, sampled here, and delivered to modules by
+[Conduit](CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context) as part of an
+invocation context. **Foreground** is the OS's foreground top-level window resolved to a `WindowRef`,
+or `null` — and null is ordinary rather than exceptional: the desktop itself can hold focus, and a
+secure or elevated window may not be resolvable.
+
+They are exposed as a **point sample** rather than as snapshot fields. A snapshot is expensive and is
+taken *after* a module starts running, which answers "where is the cursor now" when the question was
+"where was it when the user pressed the key".
+
+---
+
 ## 4. The snapshot contract
 
 **A module reads one snapshot. It does not issue queries.**
@@ -370,7 +409,13 @@ Two operations beyond placement, added for Zones' stack cycling
 | Operation | What it does | Reliability |
 |---|---|---|
 | `Raise(window)` | z-order only — the window comes in front of its overlapping siblings. **Focus is untouched** | Needs no foreground rights. Expected to work |
-| `Activate(window)` | raise, then request foreground | **May be refused by the operating system** |
+| `Show(window)` | restore if minimised, then raise | Needs no foreground rights. Expected to work |
+| `Activate(window)` | `Show`, then request foreground | **May be refused by the operating system** |
+
+`Show` exists because a caller cycling through a stack must not select a window the user cannot see,
+and restore-then-raise as two separate calls leaves a window briefly in neither state
+([ADR 0016](decisions/0016-zone-occupancy-member-states.md)). It never re-minimises on the way past —
+silently changing a window's state is the surprise this contract avoids everywhere else.
 
 **The foreground lock is the reason these are two operations and not one.** Windows restricts
 `SetForegroundWindow`: a process that has not recently received input generally cannot take
@@ -421,28 +466,22 @@ at different scale factors, and nothing else substitutes for them.
 
 ---
 
-## 9. Status — designed and documented, not built
+## 9. Status — the model compiles and its arithmetic is tested; nothing observes the desktop
 
-**No Atlas code exists.** There is no project, no namespace, no type, no test. What exists is this
-document and [`src/pillars/atlas/README.md`](../src/pillars/atlas/README.md).
+**`Coordinator.Atlas.Core` exists, compiles, and is tested.** The model types, coordinate-space
+geometry and the layout math are real code; CI built them on Ubuntu and Windows at `7aef6ff`
+(2026-08-08) with 0 warnings, and `Coordinator.Atlas.Core.Tests` passes **25 tests** across the zone
+arithmetic and the snapshot immutability guarantee. That suite runs on a Linux runner with no monitor
+attached, which is the Core/Shell split paying for itself.
 
-Both honesty statements apply, and both are required whenever this pillar's status is described:
+**Nothing here has ever looked at a desktop.** There is no `Coordinator.Atlas.Shell`: no monitor has
+been enumerated, no window moved, no DPI transition observed, no z-order read, no cursor sampled.
+Every rule on this page about *what Windows does* is a specification the implementation will be held
+to — backed by documented API behaviour, not by observation.
 
-1. **Nothing here has been compiled.** The bootstrap environment had Python 3.11 and Node and **no
-   .NET SDK**. The sketches on this page have never been through a compiler. The Python tooling
-   (`tools/coord/coord.py`, `tools/doc-audit/audit.py`) *has* been executed and its results are
-   real; nothing C#-shaped in this repository shares that status.
-2. **Nothing here has been measured.** No monitor has been enumerated, no window moved, no DPI
-   transition observed. Every rule above is a specification the implementation will be held to.
-
-**Where it sits in the plan.** [COORDINATOR.md §8](COORDINATOR.md) puts Atlas in **P2 — Conduit and
-Atlas, minimum viable**, gated on Core tests covering the geometry math plus a manual run on Windows
-reading a real multi-monitor topology correctly, *including one non-100% scaling monitor*. That
-qualifier is the point of the gate — a single-monitor pass would be a check that cannot fail. The
-live task list is [NEXT.md](NEXT.md); this pillar's resume instructions are in its
-[README](../src/pillars/atlas/README.md).
-
----
+The distinction to keep: the **arithmetic** is verified, the **observation** does not exist. A green
+test run here says the layout math is right, and says nothing whatsoever about whether a window ever
+lands where it was asked to go.
 
 ## 10. Open questions and known dragons
 

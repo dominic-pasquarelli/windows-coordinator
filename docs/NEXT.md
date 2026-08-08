@@ -82,8 +82,8 @@ are resuming and the run was green, say so with the date; if it was red, the err
 
 **What does not exist — and this is the part that matters now that it compiles.** There is **no
 module code.** Zones (M1) is now **fully designed** —
-[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0014
-settle its three non-obvious decisions — but not one line of it is written, and its code projects are
+[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0018
+settle its seven non-obvious decisions — but not one line of it is written, and its code projects are
 deliberately not scaffolded. Chrono (M2) is still a roadmap entry only. There is **no Shell adapter**, so
 not one line of Windows-facing code exists in this repository. There is **no solution file** (`.sln`
 files carry GUIDs that cannot be verified in a container; generating it is step 2 below).
@@ -254,8 +254,13 @@ specified but unbuilt.
 parts are pure and host-testable, so proving them before any window moves means that when placement
 misbehaves you already know the model is not the cause.
 
-1. **The occupancy model** — assign, cycle, and `Reconcile`, with the three invariants written as
-   failing tests first. This is the whole module; everything below is plumbing around it.
+1. **The occupancy model** — `ZoneAddress`, `StackMember` states, assign, cycle, and `Reconcile`,
+   with the three invariants written as failing tests first. This is the whole module; everything
+   below is plumbing around it. Start with the same template on two monitors — the case the first
+   design could not represent (ADR 0015, ADR 0016).
+1b. **The layout designer** — `Grid`, `Split`, `Merge` as pure operations, with merge's
+   tiles-its-bounding-box predicate tested exhaustively over a 3×3 grid, and the cell-id survival
+   rules from ADR 0018. Pure arithmetic, no UI, no desktop.
 2. **Armed-region computation**, with the test that a zone leaves the armed set the moment its depth
    drops below two — the test that stops `Win`+wheel swallowing scroll over ordinary windows.
 3. **Settings shape** and its migration path, before any UI.

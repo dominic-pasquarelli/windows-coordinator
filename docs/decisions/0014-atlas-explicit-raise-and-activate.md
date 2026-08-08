@@ -1,7 +1,7 @@
 # ADR 0014 — Atlas gains explicit raise and activate, and treats the foreground lock as a refusal
 
 Date: 2026-08-08
-Status: Accepted
+Status: Accepted · Extended by [ADR 0016](0016-zone-occupancy-member-states.md), which adds `Show` (restore-if-minimised, then raise)
 
 ## Context
 

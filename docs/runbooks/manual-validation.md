@@ -446,9 +446,18 @@ the right geometry — the basic claim of the module.
 
 1. Drop three windows onto the same zone. **Expect:** each lands in front; the previous one is behind
    it, not minimised — check the taskbar still shows all three.
-2. `Win` + wheel over that zone. **Expect:** the next window comes to the front, one per detent.
-3. Keep going. **Expect:** it cycles round; no window is skipped or lost.
-4. Wheel the other way. **Expect:** the reverse order exactly.
+2. `Win` + wheel **one detent at a time, slowly**, over that zone. **Expect:** each detent advances
+   exactly one step in ring order.
+3. Now scroll **fast**. **Expect:** it still lands somewhere in ring order and no window is ever
+   skipped *in the order* or lost — but **N detents may advance fewer than N steps**. Ticks coalesce
+   under load by design ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)), so "one per detent" is
+   guaranteed only when you are not outrunning the dispatcher. A dropped tick is expected; a window
+   that never appears is a defect.
+4. Wheel the other way, slowly. **Expect:** the reverse order exactly.
+5. Minimise a member, then cycle to it. **Expect:** it is **restored and raised**, not skipped —
+   `Show`, not `Raise` ([ADR 0016](../decisions/0016-zone-occupancy-member-states.md)).
+6. Click a buried member's taskbar button, then cycle once. **Expect:** cycling continues from the
+   window you just raised, not from wherever the ring "thought" it was.
 
 ### Z-3 — the wheel hook does not slow the desktop down
 
@@ -479,11 +488,24 @@ slightly worse.
 
 **Proves:** the fail-open rule, which is what stops the module making the desktop worse.
 
-1. Over a **stacked** zone: `Win`+wheel cycles, and a bare wheel scrolls the front window normally.
-2. Over an **unstacked** window: `Win`+wheel does **nothing** and does not swallow the event —
-   confirm by checking the window did not scroll either.
-3. Remove windows until the stack has one left. **Expect:** the zone disarms — `Win`+wheel over it
-   now behaves exactly as in step 2.
+**This has to be a differential test.** Checking that "`Win`+wheel over an ordinary window does
+nothing" proves nothing at all — most applications ignore `Win`+wheel anyway, so you would see the
+same result whether the event was passed through or swallowed. The only way to observe pass-through
+is to compare against the same input with Coordinator not running.
+
+1. **Establish the baseline with Coordinator exited.** In a long document, note exactly what plain
+   wheel does (how far one detent scrolls) and what `Win`+wheel does (in most apps: nothing, but
+   whatever it is, write it down).
+2. Start Coordinator with a stacked zone somewhere **else** on screen. Repeat step 1 over the
+   document. **Expect:** byte-for-byte the same behaviour — same scroll distance, same response to
+   `Win`+wheel. Any difference is Coordinator interfering with an application it was never pointed at.
+3. Over the **stacked** zone: plain wheel scrolls the front window exactly as it did at baseline
+   (only the modified event is ever swallowed), and `Win`+wheel cycles.
+4. Remove windows until the stack has one left. **Expect:** the zone disarms — `Win`+wheel over it
+   now matches the step-1 baseline again.
+5. **Use an application that visibly responds to a modified wheel** for at least one repetition — a
+   browser (`Ctrl`+wheel zooms) is a good proxy for confirming that modified wheel events reach the
+   application at all when Coordinator is not arming that region.
 
 ### Z-6 — the overlay always comes down
 

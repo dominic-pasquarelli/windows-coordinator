@@ -29,8 +29,8 @@ Nothing in this directory is implemented. What exists is the design —
 
 | | State |
 |---|---|
-| Internal design ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | **done** — occupancy model, stacking, cycling, reconciliation, dragons |
-| Decisions (ADR 0012 · 0013 · 0014) | **done** — stacking model, the pointer-gesture kind, Atlas raise/activate |
+| Internal design ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | **done** — addressing, occupancy and member states, stacking, cycling, reconciliation, the layout designer, dragons |
+| Decisions (ADR 0012 – 0018) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing |
 | `Coordinator.Zones.Core` | **TODO** — not created. `coord new-module zones` adds it around these docs |
 | `Coordinator.Zones.Shell` (the drag overlay) | **TODO** — not created |
 | Core tests | **TODO** — not created |
@@ -41,6 +41,20 @@ load it (P1) and needs both pillars to have implementations behind their declara
 Zones first means every error it produces arrives mixed with errors from two layers underneath —
 the "error found after the expensive step" failure this project names explicitly. The ordered path
 is in [docs/NEXT.md](../../../docs/NEXT.md).
+
+## Designing a layout
+
+Three operations, all pure and all host-testable
+([ARCHITECTURE §7](docs/ARCHITECTURE.md#7-the-layout-designer)):
+
+- **Grid** — type a column and row count, get that grid.
+- **Split** — divide an existing cell along either axis.
+- **Merge** — combine cells back together, **refused unless they tile their bounding box exactly**.
+
+The interesting part is not the arithmetic; it is that a cell id is a permanent contract, so an edit
+has to say what happens to the stacks addressed by the cells it changes. Split keeps the id on the
+first fragment; merge keeps the first cell's id in reading order, retires the rest permanently, and
+concatenates their stacks into the survivor.
 
 ## The two things worth knowing before you read the design
 
@@ -60,11 +74,13 @@ forces, is [ARCHITECTURE §3](docs/ARCHITECTURE.md#3-cycling-and-the-gesture-pro
    model; everything else is plumbing around it.
 2. [docs/MODULE_SPEC.md](../../../docs/MODULE_SPEC.md) — the contract every module implements.
 3. [docs/ATLAS.md](../../../docs/ATLAS.md) and [docs/CONDUIT.md](../../../docs/CONDUIT.md) — the two
-   pillars Zones is built on. Zones needs one extension from each, both already specified.
+   pillars Zones is built on. Zones needs several extensions from each — zone addressing and
+   durable monitor keys, z-order, `Show`, the pointer-gesture kind, and the invocation context —
+   all specified in ADRs 0013–0017.
 
 ## Decisions that shaped this module
 
-The unified log is [`docs/decisions/`](../../../docs/decisions/). The three that govern Zones:
+The unified log is [`docs/decisions/`](../../../docs/decisions/). The seven that govern Zones:
 
 - **[ADR 0012](../../../docs/decisions/0012-zones-stacking-model.md)** — a zone holds an ordered
   stack; stacking is z-order; membership is intent reconciled against the desktop; stacks are
@@ -75,6 +91,15 @@ The unified log is [`docs/decisions/`](../../../docs/decisions/). The three that
 - **[ADR 0014](../../../docs/decisions/0014-atlas-explicit-raise-and-activate.md)** — Atlas gains
   raise and activate as explicit operations, and treats the Windows foreground lock as a refusal
   rather than a failure.
+- **[ADR 0015](../../../docs/decisions/0015-zone-addressing-and-durable-monitor-identity.md)** — a
+  zone is addressed by (monitor, layout, cell), and persisted settings key on a **durable**
+  `MonitorKey` rather than a snapshot-local handle.
+- **[ADR 0016](../../../docs/decisions/0016-zone-occupancy-member-states.md)** — a stack member
+  carries state, ring order is not a claim about visibility, and reconciliation is generation-aware.
+- **[ADR 0017](../../../docs/decisions/0017-invocation-context-and-one-drag-lifecycle.md)** — every
+  dispatch carries an invocation context, and a drag has exactly one lifecycle.
+- **[ADR 0018](../../../docs/decisions/0018-layout-editing-grid-split-merge.md)** — the layout
+  designer: grid, split and merge as pure operations, and what happens to cell ids.
 
 ## Where to resume
 
@@ -85,9 +110,10 @@ When they close, the first action in this directory:
 
 > Run `coord new-module zones` — it fills the code projects in around these docs and leaves them
 > untouched — then write `ZoneOccupancy` and its tests **before anything that touches a window**.
-> Assign, cycle, reconcile: all pure, all testable with no desktop, and all three invariants in
+> Assign, cycle, reconcile: all pure, all testable with no desktop, with the three invariants in
 > [ARCHITECTURE §2](docs/ARCHITECTURE.md#2-the-occupancy-model--the-heart-of-the-module) written as
-> failing tests first.
+> failing tests first — and **start with the case the first design could not represent**: the same
+> template applied to two monitors, keeping two independent stacks.
 
 Then, in order:
 

@@ -1,7 +1,7 @@
 # ADR 0013 — A sixth Conduit trigger kind: the pointer gesture, decided from pre-resolved regions
 
 Date: 2026-08-08
-Status: Accepted
+Status: Accepted · Extended same day after review of PR #2 — the update, revocation, queue and token contract is in [CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)
 
 ## Context
 
@@ -87,6 +87,19 @@ broken.
   Conduit testing against rectangles that no longer exist. Bounded by carrying the Atlas topology
   generation with the region set, so Conduit can drop a set that is provably stale rather than acting
   on it.
+- **The region set is shared across threads, so its publication is part of the contract.** A module
+  computes it on a worker; the hook reads it on every wheel event. Published sets are **immutable**,
+  publication is an **atomic reference swap**, **Conduit owns the lifetime** so an unloading module
+  cannot free memory the hook is reading, and **unregistration stops future dispatches rather than
+  cancelling one in flight** — a module tolerates one late dispatch rather than making the hook
+  thread synchronise with module shutdown. Specified in
+  [CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture).
+
+  *This was missing from the first draft of this ADR, which specified staleness and said nothing
+  about the swap.* The omission is worth recording because the shape is a recurring trap — a borrowed
+  reference read concurrently by another thread, with no ownership rule and no protection against the
+  owner detaching mid-read — and it is easy to write a design that answers "is this data current?"
+  while never answering "is it safe to read at all?".
 
 ## Alternatives considered
 

@@ -87,7 +87,7 @@ related:
 
 ## Decisions (ADRs)
 
-The unified decision log (14 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
+The unified decision log (18 ADRs) — [docs/decisions/](decisions/). Splitting it per module would destroy the two properties that make it useful: reading the project's reasoning in the order it happened, and a numbered gap being a detectable error.
 
 - [ADR 0001 — Adopt the Axon documentation and operating protocols](decisions/0001-adopt-the-axon-documentation-and-operating-protocols.md)
 - [ADR 0002 — C# / .NET 9 and WinUI 3 as the stack](decisions/0002-csharp-dotnet9-and-winui3-as-the-stack.md)
@@ -103,3 +103,7 @@ The unified decision log (14 ADRs) — [docs/decisions/](decisions/). Splitting 
 - [ADR 0012 — A zone holds an ordered stack, realised as z-order](decisions/0012-zones-stacking-model.md)
 - [ADR 0013 — A sixth Conduit trigger kind: the pointer gesture, decided from pre-resolved regions](decisions/0013-the-pointer-gesture-trigger-kind.md)
 - [ADR 0014 — Atlas gains explicit raise and activate, and treats the foreground lock as a refusal](decisions/0014-atlas-explicit-raise-and-activate.md)
+- [ADR 0015 — Zones are addressed by (monitor, layout, cell), and monitors get a durable key](decisions/0015-zone-addressing-and-durable-monitor-identity.md)
+- [ADR 0016 — A stack member carries state, and reconciliation is generation-aware](decisions/0016-zone-occupancy-member-states.md)
+- [ADR 0017 — Every dispatch carries an invocation context, and a drag has exactly one lifecycle](decisions/0017-invocation-context-and-one-drag-lifecycle.md)
+- [ADR 0018 — Layout editing is three pure operations, and cell ids survive them](decisions/0018-layout-editing-grid-split-merge.md)

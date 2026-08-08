@@ -156,7 +156,8 @@ expensive has happened, and it cannot be starved by a slow handler because no ha
 input path to begin with. A low-level hook can express things a registration cannot (a modifier held
 during a drag), but it puts our code on every keystroke the machine processes. So: **registrations
 for plain chords; a hook only where the intent genuinely cannot be expressed as one**, which today
-means gestures (§3.5) and nothing else. Revisit when a real intent arrives that needs more.
+means the two pointer-driven kinds — gestures (§3.5) and pointer gestures (§3.6) — and nothing else.
+Revisit when a real intent arrives that needs more.
 
 ### 3.2 Window event
 
@@ -266,6 +267,57 @@ broken, and the user cannot tell which component did it.
 **Staleness is bounded by the topology generation.** An armed region set carries the Atlas generation
 it was computed at, so Conduit can drop a provably-stale set rather than acting on rectangles that
 no longer describe any monitor.
+
+**Publication is an atomic swap of an immutable set, and this is a hard requirement rather than an
+implementation note.** A module computes a region set on a worker thread; the hook thread reads it on
+every wheel event. Those are different threads, and the naive shape — a mutable collection the module
+edits in place while the hook walks it — is a data race on the input path of the whole desktop, which
+is the worst place in this system to have one.
+
+So the contract is:
+
+- A region set is **immutable once published.** A module that wants different regions builds a new
+  set and publishes that; it never edits a published one.
+- Publication **replaces the current set in a single atomic reference swap.** The hook thread reads
+  the reference once per event and works with whatever set it got — a set that was current a
+  microsecond ago is a perfectly good answer, and a torn read is not.
+- **Conduit owns the published set's lifetime**, not the module. A module that unregisters, or is
+  unloaded mid-drain, must not be able to free memory the hook is reading. The last set stays alive
+  until Conduit is certain no reader holds it.
+- **Unregistration is not immediate disarmament.** It stops future dispatches; a swallow decision
+  already in flight completes. A module must therefore tolerate one dispatch arriving after it asked
+  to stop, which is cheaper for everyone than making the hook thread synchronise with a module's
+  shutdown.
+
+*(Recorded because the shape is a known trap rather than a hypothetical: a borrowed pointer read
+concurrently by another task, with no ownership rule, no lifetime guarantee, and no protection
+against the owner detaching mid-read. The first draft of this kind specified staleness and forgot
+the swap entirely.)*
+
+**Updating a live region set is its own operation, and it can be refused.** A module republishes
+constantly — every layout change, every stack that crosses depth two. So:
+
+| Question | Answer |
+|---|---|
+| A new set overlaps another owner | The **update is refused** (`RegionsOverlapAnotherOwner`) |
+| What happens to the previous set after a refusal | **It stays active.** Silently disarming on a failed update would break cycling with no signal — the module would believe it had regions and have none |
+| Who wins an overlap | The **earlier registration**, deterministically. Conduit never silently steals a region from its current owner |
+| How an owner gives up a region | Only by updating or unregistering. There is no revocation-by-preemption |
+| Where the topology generation comes from | **Atlas**, carried on the set by the publishing module, which got it from the snapshot it computed against. Conduit compares it with the generation it last observed from Atlas |
+
+**The queued event carries a token, not coordinates.** A dispatch carries the **opaque zone token**
+that matched and the **region-set version** it matched under — never a bare cursor position. On
+delivery the module checks the version is still current and drops the event if it is not. Without
+this, a layout change between recognition and dispatch cycles *a different zone than the one the
+user pointed at*, which is both wrong and untraceable.
+
+**Coalescing key: `(intent, zone token)`.** Ticks for the same zone coalesce and their deltas sum;
+ticks for different zones never coalesce with each other.
+
+**The swallow happens only after the bounded queue has accepted the event.** The order is: test →
+**try-enqueue** → if enqueued, swallow; if not, pass through. This is what makes fail-open real
+rather than aspirational — a saturated queue produces a scroll that works, not a scroll that
+vanishes.
 
 ---
 
@@ -402,6 +454,46 @@ advance so it does not get negotiated later:
 
 ---
 
+### 5.5 What every dispatch carries — the invocation context
+
+A dispatch says *that* something happened. A module almost always also needs *the state of the world
+when it happened*: which window had focus when the chord fired, where the cursor was, which monitor
+that was over. Without it, a capability like "snap the focused window" or "cycle the zone under the
+cursor" cannot be implemented at all without a module reaching for Windows itself — which
+[principle 4](COORDINATOR.md#7-non-negotiable-principles) forbids, and building a focus cache from
+§3.2's coalesced hints is worse.
+
+So **every payload carries an `InvocationContext`**: cursor position, the monitor under it, the
+foreground window, the Atlas topology generation, and a monotonic stamp.
+
+**Conduit samples it; [Atlas](ATLAS.md) defines and provides it.** Conduit is on the dispatch path and
+knows when "now" is; Atlas owns what "the cursor" and "the foreground window" *mean*. Conduit asks
+Atlas for a **point sample** — three reads, deliberately not a snapshot — and stamps it on. A module
+never queries either pillar for these.
+
+**Sampled at dispatch, not read later.** By the time a module runs the user has moved the mouse; the
+semantically correct values are the ones at the instant the input happened, and only the dispatcher is
+there at that instant. Freshness is then the *caller's* check: a module that goes on to read a full
+snapshot compares generations, and a mismatch means refuse rather than proceed on mixed data.
+
+Refusals are values as everywhere else: `NoForegroundWindow`, `ForegroundNotManageable`,
+`NoMonitorUnderCursor`, `ContextStale`.
+
+### 5.6 One interaction, one stream
+
+**A module must not compose two intent streams to reconstruct one interaction.** There is no ordering
+guarantee between kinds and there is deliberately not going to be one — providing it would mean
+specifying cross-stream ordering across the whole taxonomy to serve one consumer.
+
+The concrete case: a drag is the **input gesture** kind, whose payload carries the dragged
+`WindowRef` and an `InvocationContext`, and whose `Started`/`Ended` pairing is the cleanup guarantee.
+The window-event pair remains for consumers that want raw move/size transitions — but a drag-to-snap
+module subscribes to the gesture and nothing else. Zones' first draft used both and had an undefined
+race over which stream owned taking the overlay down
+([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
+
+---
+
 ## 6. The Core/Shell split, applied here
 
 Conduit is two projects, per [COORDINATOR.md §3](COORDINATOR.md) and ADR 0003.
@@ -446,7 +538,7 @@ drag; that anything survives a session lock, a fast-user-switch, or a UAC prompt
 
 ## 7. Adding a trigger kind — the extension contract
 
-The five kinds in §3 exist because a real consumer needed each one. A sixth needs the same
+The six kinds in §3 exist because a real consumer needed each one. A seventh needs the same
 justification. This section is the checklist for adding one: the point is that the fabric stays small
 and the modules stay ignorant of mechanism.
 
@@ -489,32 +581,24 @@ and every future arbitration rule must cover.
 
 ---
 
-## 8. Status — designed and documented, not built
+## 8. Status — contract types compile, the fabric does not exist
 
-**No Conduit code exists.** There is no project, no namespace, no interface, no test. What exists is
-this document and [`src/pillars/conduit/README.md`](../src/pillars/conduit/README.md).
+**`Coordinator.Conduit.Core` exists and compiles** — the trigger-intent model, the registration
+outcome including first-class refusal, and the dispatch shape. CI built it on Ubuntu and Windows at
+`7aef6ff` (2026-08-08) with 0 warnings.
 
-Two separate honesty statements, both required whenever this pillar's status is described:
+**Nothing behind those declarations exists.** There is no registry, no arbiter, no dispatcher, no
+hook, no `Coordinator.Conduit.Shell`, and **no tests** — unlike Atlas, this pillar's interesting
+logic (arbitration) is not written yet, so there is nothing to test. Compiling a set of declarations
+proves they are well-formed and nothing more.
 
-1. **Nothing here has been compiled.** The environment this bootstrap was authored in had Python 3.11
-   and Node and **no .NET SDK**. The sketches on this page have never been through a compiler and
-   should be read as notation, not as code. The Python tooling (`tools/coord/coord.py`,
-   `tools/doc-audit/audit.py`) *has* been executed and its results are real; nothing C#-shaped in
-   this repository shares that status.
+Two honesty statements, both required whenever this pillar's status is described:
+
+1. **Not one input event has ever been dispatched.** No chord has been registered, no hook installed,
+   no gesture recognised, no wheel event swallowed or passed through.
 2. **Nothing here has been measured.** Every latency budget, every guarantee, every "always" and
-   "never" in §3 through §5 is a specification the implementation will be held to — not a
-   description of observed behavior. The gap closes in the order the roadmap says, and it closes
-   with recorded evidence: Core tests for the decidable half, a
-   [manual-validation](runbooks/manual-validation.md) pass for the rest.
-
-**Where it sits in the plan.** [COORDINATOR.md §8](COORDINATOR.md) puts Conduit in **P2 — Conduit
-and Atlas, minimum viable**, gated on Core tests covering arbitration (including the
-two-modules-one-chord case) plus a manual run on Windows recording a real chord firing and a real
-schedule firing. P2 is downstream of P1, whose first task is restoring the toolchain and compiling
-anything at all. The live task list is [NEXT.md](NEXT.md); the resume instructions for this pillar
-specifically are in its [README](../src/pillars/conduit/README.md).
-
----
+   every "never" on this page is a specification the implementation will be held to — not an
+   observation. §5.4 exists precisely because those numbers have to be *earned*.
 
 ## 9. Open questions and known dragons
 
