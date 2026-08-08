@@ -261,7 +261,7 @@ jobs:
   # under src/ while no solution does, that is a real inconsistency and this job goes red for it.
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   windows-build:
-    name: Windows build (full solution — compile only, never a behavior claim)
+    name: Windows build (every project under src/ — compile only, never a behavior claim)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
