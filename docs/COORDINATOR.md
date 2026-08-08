@@ -56,13 +56,21 @@ what makes any of this testable, and it is why an evidence claim in this project
 standard are adapted from a mature embedded project (Axon) that this project's owner also maintains.
 The adaptation is recorded in ADR 0001; the *why* beneath the rules is [OPERATING_MODEL.md](OPERATING_MODEL.md).
 
-**Honesty boundary, stated up front.** At the time of writing, **no C# in this repository has ever
-been compiled.** The bootstrap was authored in a container with Python 3.11 and Node and **no .NET
-SDK**. The Python tooling (`tools/coord/`, `tools/doc-audit/`) is executed and verified; every C#
-artifact — including the interface sketches in [MODULE_SPEC.md](MODULE_SPEC.md) — is written and
-unverified. The first task in [NEXT.md](NEXT.md) is to restore the toolchain on a Windows/.NET
-machine, generate the solution, compile the skeleton, and record the result. Until that is done,
-nothing here may be described as building, passing, or working.
+**Honesty boundary, stated up front.** The bootstrap was authored in a container with Python 3.11 and
+Node and **no .NET SDK**, so CI was the first compiler this repository ever had. **It compiles, and
+the Core logic is tested:** GitHub Actions at `7aef6ff` (2026-08-08) built every project on Ubuntu and
+on Windows — 0 warnings under `TreatWarningsAsErrors` — and ran **45 Core tests, 0 failed** (Atlas 25,
+Platform 20). The Python tooling (`tools/coord/`, `tools/doc-audit/`) is executed and verified.
+
+**That is a claim about compilation and pure logic, and nothing else.** No module code exists, there
+is no Shell adapter, there is still no solution file (**TD-2**), `coord build` and `coord run` have
+never executed their `dotnet` path, and **nothing in this repository has ever run on Windows** — no
+hotkey registered, no monitor enumerated, no window moved, no tray icon shown. The interface sketches
+in [MODULE_SPEC.md](MODULE_SPEC.md) are illustrative prose that nothing compiles. So *"compiles"* and
+*"the Core tests pass"* may be said and are checkable; **"works" may not**, and only
+[manual-validation.md](runbooks/manual-validation.md) performed on a real desktop can change that.
+The first task in [NEXT.md](NEXT.md) is still to restore the toolchain on a Windows/.NET machine,
+generate the solution, and record what a *local* build returns.
 
 ---
 
@@ -320,8 +328,10 @@ developer entry point. No product code beyond contract interfaces.
 
 **Gate:** a cold reader can resume from the docs alone; `coord audit` and `coord map --check` run green
 with **Python only**, no .NET installed; `coord doctor` correctly reports the missing SDK rather than
-failing obscurely; [NEXT.md](NEXT.md) names the first executable task. **Explicitly not claimed:** that
-any C# compiles.
+failing obscurely; [NEXT.md](NEXT.md) names the first executable task. **This gate deliberately does
+not require that any C# compiles** — it is a documentation-and-tooling gate. *(As it happens CI has
+since compiled every project and run the Core suites, at `7aef6ff`; that exceeds the gate rather than
+being part of it, and it is still not a local build — see P1.)*
 
 ### P1 — The skeleton compiles
 

@@ -138,7 +138,9 @@ how settings, the Shell form, and any future binding surface all find it — you
 once and get the rest.
 
 ```csharp
-// ILLUSTRATIVE SKETCH — not compiled, and `zones` does not exist. See MODULE_SPEC §2.2.
+// ILLUSTRATIVE SKETCH — not compiled. These ids are invented for this walkthrough; the REAL Zones
+// capability ids are in its ARCHITECTURE §8.1 and do not match these. Never copy an id from a
+// recipe — ids are a permanent contract. See MODULE_SPEC §2.2.
 public static class ZonesCapabilities
 {
     public static readonly CapabilityId Apply      = new("zones.layout.apply");

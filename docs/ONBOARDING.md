@@ -118,7 +118,7 @@ src/pillars/conduit/ Conduit
 src/pillars/atlas/   Atlas
 src/modules/         one self-contained directory per module (empty by design today)
 src/shell/           the WinUI settings + dashboard host (Windows-only)
-tests/               where Core test projects will live — none exists yet
+tests/               two Core test projects (Atlas, Platform) — net9.0, run anywhere
 tools/coord/         the `coord` CLI (stdlib-only Python)
 tools/doc-audit/     the code↔docs drift checker (`coord audit` wraps it)
 ```

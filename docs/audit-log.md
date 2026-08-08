@@ -26,6 +26,122 @@ related:
 
 ---
 
+## 2026-08-08 — Accuracy audit before merging PR #2 (`/audit`, whole repository)
+
+**Scope:** the whole repository, driven by the 27-doc accuracy backlog. Requested explicitly as
+"confirm or correct each, stamp only what is verified" — so the interesting output is as much the
+**coverage boundary** as the fixes.
+
+**Counts:** `coord audit` **0 error · 27 warn · 0 info → 0 · 0 · 0**. `coord audit --since
+origin/main` 0/0/0 · `coord map --check` clean · 11 scaffold tests green. **No C# behaviour changed**
+(one Python fix to the checker). Nothing has run on Windows.
+
+### Ground truth reconciled (Lens A, performed — not intended)
+
+`ls src/modules src/pillars src/platform src/shell tests` · `find -name '*.csproj'` (**5**: 3
+production + 2 test) · `find -name '*.sln'` (**0**) · `ls docs/decisions` (**24 ADRs**) · `coord.py`
+subcommands vs `tools/coord/README.md` (**match**) · `audit.py` emitted check names vs
+`tools/doc-audit/README.md` (**mismatch — see Fixed #6**).
+
+### Fixed
+
+1. 🔴 **`docs/COORDINATOR.md` §1 still said "no C# in this repository has ever been compiled" and
+   "nothing here may be described as building, passing, or working."** False since CI `7aef6ff`. The
+   canonical architecture doc was the single worst place in the repository for this to survive.
+2. 🔴 **`CLAUDE.md`'s Status section contradicted `CLAUDE.md`'s own opening** — "No C# has been
+   compiled — ever", "No module exists … a directory-level plan and no code", "the pillars are
+   specified, not built". The opening block was corrected in the PR #1 evidence sweep and the Status
+   section, ~370 lines down the same file, was not.
+3. 🟡 **The `tests/` directory was described as empty in three places** — `README.md`,
+   `docs/ONBOARDING.md` (both directory-tree diagrams) and `CLAUDE.md`'s doc-map table ("none yet").
+   Two test projects have existed since PR #1.
+4. 🟡 **`README.md`'s module table listed Zones as "Planned — not implemented, not scaffolded"**,
+   with no hint that a full architecture doc and thirteen ADRs exist. Implementation status was right;
+   a reader would not have known there was anything to read.
+5. 🟡 **`src/modules/README.md` said Zones' decisions are "ADR 0012–0014."** Now 0012–0024.
+6. 🟡 **`tools/doc-audit/README.md` documented 15 of the checker's 16 checks** — `projectref`,
+   added earlier the same day, was missing from the table it belongs in.
+7. 🟡 **`docs/recipes/add-a-module.md` invented `zones.layout.*` capability ids** that do not match
+   the real ones in Zones' ARCHITECTURE §8.1, under a note saying "`zones` does not exist" — no longer
+   true, and ids are a permanent contract. Now says so explicitly.
+8. 🟡 **TD-12's trip-wire had FIRED unnoticed** (Lens E). The row set its own threshold at "roughly
+   twenty ADRs" while saying "ten ADRs, all fresh"; there are 24, thirteen added by PR #2 with several
+   cross-correcting. Marked fired, and given a recall hook in NEXT.md's trip-wire table — a fired
+   trigger with no route back is the failure Lens E exists to catch.
+9. 🔴 **The `accuracy` check could not pass** — see below.
+
+### The check that could not pass
+
+The accuracy backlog would not clear no matter how honestly the docs were audited. Its commit arm
+counts **repo-wide commits since the `audited` date**, so on a project whose entire history is one
+calendar day it counts commits that landed *before* the pass as well as after. Re-auditing changed
+nothing; 27 stayed 27.
+
+**That is a check that cannot pass — the mirror of
+[OPERATING_MODEL §7](OPERATING_MODEL.md#7-the-evidence-standard--what-it-works-is-allowed-to-mean)'s
+"a check that cannot fail", and just as useless.** A guard that is unsatisfiable teaches people to
+ignore it, which then hides the real findings it was meant to surface.
+
+Fixed by skipping the commit arm while `audited` is **today** — the same accommodation `updated-flag`
+already makes for an unchanged value that equals today, and for the identical reason: *a date is
+day-granular, and a check may not demand a precision the field cannot carry.* The day arm is
+untouched.
+
+**Proved in all three directions**, because a fix that merely silences a warning is indistinguishable
+from one that removes a guard:
+
+| Case | Expected | Result |
+|---|---|---|
+| `audited` = today, 27 same-day commits | no warning | **0 stale** ✓ |
+| `audited` 8 days ago | day arm fires | **fires** ✓ |
+| `audited` 1 day ago, 17 commits | commit arm fires | **fires — "17 commits since"** ✓ |
+
+### Coverage — what was and was not verified
+
+**20 docs stamped `audited`**, each verified in substance against ground truth this pass.
+
+**5 docs deliberately NOT stamped:** `docs/AUDIT.md`, `docs/DOC_SPEC.md`, `docs/MODULE_SPEC.md`,
+`docs/OPERATING_MODEL.md`, `docs/vision.md`. They were checked for the two failure modes that could be
+established mechanically — no superseded PR #2 contract is referenced, and no false evidence claim
+appears — but they were **not read end to end**, and they are normative documents where the risk is a
+rule that quietly stopped matching practice. **They now show as clean under the repaired check while
+being unverified**, which is the honest cost of the day-granularity fix and is recorded here precisely
+because the flag can no longer carry it.
+
+### Backlog
+
+- **Re-read the five unstamped docs end to end.** Best done as a `/deep-audit`, which is built for
+  exactly the normative-drift question they pose.
+- **TD-12** — convert plain-text `ADR NNNN` references to links, or add an `adr-ref` check resolving
+  them by number. Trip-wire fired; hook in NEXT.md.
+- **The accuracy baseline cannot express same-day precision.** Storing a commit sha alongside the date
+  would fix it properly. Not done here: it is a frontmatter schema change and a judgement call, and
+  the protocol says propose rather than auto-apply.
+
+### Accepted (not drift)
+
+- `docs/runbooks/dev-setup.md`'s "no `.sln` exists yet (TD-2)" — still true.
+- `COORDINATOR §8` P0's gate not requiring a compile — a gate is a minimum; CI exceeding it is not
+  drift. Reworded so it cannot be misread as "the C# does not compile".
+- The CLAUDE.md ↔ COORDINATOR §7 principle duplication — the one accepted duplication, per its note.
+
+### Health
+
+- **Lens A:** 8 real findings, all fixed. The pattern across all of them: **status text in structural
+  positions** — tree diagrams, map tables, a Status section far from the summary it contradicts. The
+  PR #1 sweep fixed ~65 body-text claims and left every one of these.
+- **Lens B:** clean. `boundary` and `projectref` green; no Windows type in any Core project; no module
+  reaching around a pillar; no speculative platform without a consumer.
+- **Lens C:** Zones satisfies four of five shelving items; item 4 (tests green) is **unverified — no
+  toolchain**, recorded rather than ticked.
+- **Lens D:** practice matched the operating model. Eight review rounds produced ADRs rather than
+  quiet fixes, and no hard gate was added to a steering path.
+- **Lens E:** one fired trigger found (TD-12). INBOX empty, no `Proposed` ADRs outstanding.
+- **Lens F:** settings remain additive-extendable; `layoutRevision` was added as a field rather than a
+  reshape; module identity still threads settings, bindings and update manifests.
+
+---
+
 ## 2026-08-08 — PR #2 round 8: two versions doing one job, and a metric that could not measure itself
 
 **Scope:** the pointer-gesture payload's version contract and the `DesktopFacts` repair metric,

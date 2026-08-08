@@ -831,12 +831,20 @@ def check_accuracy(rep: Report) -> None:
         except ValueError:
             continue                                   # an invalid date is check_frontmatter's job
         age = (today - ad).days
-        commits = _repo_commits_since(str(audited))
         reasons = []
         if age > STALE_DAYS:
             reasons.append(f"{age}d since the last accuracy pass")
-        if commits is not None and commits > STALE_COMMITS:
-            reasons.append(f"{commits} commits since")
+        # The commit arm counts commits made SINCE the audited DATE, which on a same-day burst
+        # counts commits that landed *before* the pass as well as after — so on the day of an
+        # audit it can never be satisfied, and re-auditing does not clear it. That is a check that
+        # cannot pass, the mirror of the failure OPERATING_MODEL §7 names, so the arm is skipped
+        # while `audited` is today. Same reasoning as `updated-flag` accepting an unchanged value
+        # that already equals today: a date is day-granular, and the check may not demand a
+        # precision the field cannot carry. The day arm below still fires from tomorrow onward.
+        if age > 0:
+            commits = _repo_commits_since(str(audited))
+            if commits is not None and commits > STALE_COMMITS:
+                reasons.append(f"{commits} commits since")
         if reasons:
             rep.add("warn", "accuracy", rel, None,
                     f"accuracy stale ({'; '.join(reasons)}; audited {audited})",
