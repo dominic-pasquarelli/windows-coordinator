@@ -116,7 +116,7 @@ The arrows only point one way. A module depends on the platform and the pillars.
 depends on a module, and a module never depends on another module. That boundary is mechanically
 enforced by the `boundary` check in [`tools/doc-audit/`](../tools/doc-audit/README.md), which reads
 `using` directives, namespaces, `[DllImport]` attributes, and `ProjectReference` elements as text —
-so it works even while the C# remains uncompiled.
+so it needs no compiler and runs on any checkout, including one with no .NET SDK installed.
 
 ---
 

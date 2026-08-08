@@ -109,10 +109,11 @@ Core project.
 ## Where to resume
 
 **No module work starts yet.** The ordered path is in [docs/NEXT.md](../../docs/NEXT.md), and it
-puts two things ahead of the first module for a specific reason: the platform contract has never
-been compiled, and the pillars a module would depend on do not exist. Building the first module on
-that base means every error it produces arrives mixed with errors from two layers underneath —
-which is the "error found after the expensive step" failure this project names explicitly.
+puts two things ahead of the first module for a specific reason: the platform contract compiles but
+nothing *implements* it — there is no module host to load a module, and neither pillar has an
+implementation behind its declarations. Building the first module on that base means every error it
+produces arrives mixed with errors from two layers underneath — the "error found after the expensive
+step" failure this project names explicitly.
 
 The first action in this directory, when P1 and P2 have closed:
 

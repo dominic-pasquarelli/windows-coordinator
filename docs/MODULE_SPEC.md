@@ -65,7 +65,9 @@ fill out a category.
 Three things: a **lifecycle**, a **capability declaration**, and **trigger-intent declarations**. All
 three live in the module's **Core** project. The Shell adapter implements none of them.
 
-> Sketches only — uncompiled. Namespaces, nullability, and async shapes will move on first build.
+> Sketches only — these code blocks are illustrative prose and are not compiled by anything. The
+> real types in `src/platform/Coordinator.Platform.Core/` do compile (CI `7aef6ff`) and are the
+> authority where the two disagree; reconciling them is a named task in that project's README.
 
 ### 2.1 The lifecycle interface
 

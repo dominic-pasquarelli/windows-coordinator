@@ -89,7 +89,10 @@ public enum CapabilityKind
 /// </para>
 /// <para>
 /// Reconciling that omission with MODULE_SPEC's sketch is a named task for the first session with
-/// a compiler — see the platform README's "Where to resume".
+/// a real consumer — a settings surface, a validator, a binding surface, or the module host. A
+/// compiler cannot settle it (one has now read this file and had no opinion on the question); only
+/// something that has to RENDER or VALIDATE a value can say what the declaration must carry. See
+/// the platform README's "Where to resume".
 /// </para>
 /// </remarks>
 /// <param name="Id">The permanent address. See <see cref="CapabilityId"/>.</param>

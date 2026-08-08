@@ -175,15 +175,15 @@ Setup detail is in [runbooks/dev-setup.md](runbooks/dev-setup.md). The sequence:
 7. **Re-run `coord audit` and `coord map --check`** before you stop, and bump the `updated` flag on
    every doc you touched ([DOC_SPEC §6](DOC_SPEC.md#6-lifecycle--created--maintained--accuracy-audited--closed-out--frozen)).
 
-> **The skeleton is expected to need fixes. That is not failure — it is the first honest signal this
-> project has ever had.** Code written without a compiler in the loop is a hypothesis. The value of
-> this step is not that it will go smoothly; it is that afterwards, for the first time, a statement
-> about this codebase can be *checked*. Budget a session for it, not ten minutes, and resist the
-> urge to expand scope while you are in there.
+> **Expect this to be less dramatic than it once would have been.** CI already compiles every
+> project and runs the Core suites, so the code is not a hypothesis any more — what is unproven is
+> the *developer path*: the solution, `coord build` and `coord test` against a real SDK, `coord run`,
+> and anything Windows-targeted, none of which CI exercises through the tool. Budget a session
+> rather than ten minutes, and resist expanding scope while you are in there.
 
-**Do not** start Conduit, Atlas, or a module before this closes. Building on an uncompiled base means
-every later error arrives mixed with this one, which is failure shape 3 — an error discovered after
-the expensive step.
+**Do not** start Conduit, Atlas, or a module before this closes. A machine that cannot build or run
+the thing cannot tell you whether your change worked, so every later error arrives mixed with a
+toolchain question — failure shape 3, an error discovered after the expensive step.
 
 ---
 
@@ -192,9 +192,11 @@ the expensive step.
 Ordered, with the evidence that closes each step. The canonical phase gates live in
 [COORDINATOR.md §8](COORDINATOR.md#8-roadmap); this is the task decomposition beneath them.
 
-### P1 — The skeleton compiles and the platform core comes up
+### P1 — A developer machine can build and run it, and the platform core comes up
 
-1. **The Active focus above** — solution generated, first compile, first honest result recorded.
+1. **The Active focus above** — solution generated, first *local* build and test, first `coord run`,
+   result recorded. (The code already compiles in CI at `7aef6ff`; what this buys is a machine a
+   human can iterate on.)
 2. **Contract interfaces settle.** Whatever the compiler forces you to change in the module
    membrane, reflect it in [MODULE_SPEC.md](MODULE_SPEC.md) in the same session. A spec that
    describes an interface the compiler rejected is worse than no spec.

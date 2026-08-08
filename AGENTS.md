@@ -33,8 +33,8 @@ done until a cold reader could resume from the docs alone.
 
 **Audit protocol:** before a phase ends or a module is shelved, run `coord audit` (mechanical
 code↔doc drift plus the modularity **boundary** check, which reads `using` directives, namespaces,
-`[DllImport]` attributes and `ProjectReference` elements as text — so it works while the C# is still
-uncompiled) and walk the six lenses (alignment · modularity · resumability · fidelity ·
+`[DllImport]` attributes and `ProjectReference` elements as text — so it needs no compiler and runs
+on a machine with no .NET SDK) and walk the six lenses (alignment · modularity · resumability · fidelity ·
 recall/lifecycle · connectivity/forward-compat), then log it in
 [docs/audit-log.md](docs/audit-log.md). ERROR-level drift blocks a phase. Invoke the full pass with
 the `/audit` skill; the rarer two-blind-passes sweep is `/deep-audit`; everything in one sitting is

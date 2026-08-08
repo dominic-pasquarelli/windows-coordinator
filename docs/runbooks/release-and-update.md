@@ -334,7 +334,8 @@ record of what happened to this repository, rather than two that drift.
 Nothing here has been executed. The concrete conditions that let this document drop its
 **designed-not-built** framing, in order:
 
-1. **A build exists at all.** Blocked on the first compile ([NEXT.md](../NEXT.md) Active focus).
+1. **A shippable artifact exists at all.** The code compiles (CI `7aef6ff`), but nothing produces
+   a package — there is no host process, no Shell, and no solution ([NEXT.md](../NEXT.md)).
 2. **The seam exists** — packaging identity, version comparison as tested Core logic, and an
    install-over path that preserves settings. That is P1.
 3. **The pipe works end to end** — package, deliver, install over an existing install, with a

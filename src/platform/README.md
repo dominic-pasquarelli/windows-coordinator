@@ -141,25 +141,24 @@ project record, never split per area. The four that govern the code here:
 
 ## Where to resume
 
-**Blocked on the toolchain, not on design.** Do not add types here until a `dotnet build` has
-succeeded once on a Windows/.NET 9 machine — the Active focus in
-[docs/NEXT.md](../../docs/NEXT.md).
+**Not blocked.** These types compile and 20 tests exercise the settings and capability logic
+(CI `7aef6ff`). What is missing is an implementation, not a verdict from a compiler.
 
-When that unblocks, the first action is to make the compiler judge what is already written:
+The first action here is the one the contract cannot be judged without:
 
-> Add `Coordinator.Platform.Core.csproj` to the generated solution and build it **alone**, before
-> anything else in the repository. It has no project references and no package references, so a
-> failure here is a failure in these five files and nothing else — which makes it the cheapest
-> possible first honest signal. Expect `TreatWarningsAsErrors` to bite; fix the smallest thing that
-> satisfies the compiler, and resist redesigning anything while you are in there.
+> Write the **module host** — load, start, stop, unload, with a module that throws on load isolated
+> so the host and the other modules survive (principle 12). It is the first thing that will *use*
+> `IModule` and `IModuleContext` rather than merely declare them, and it is what turns the three
+> open questions below from taste into evidence.
 
-Then, in this order, three known open questions — each already written into the file that carries
-it, so the code and this list cannot drift apart:
+Three known open questions follow, in order. Each is already written into the file that carries it,
+so the code and this list cannot drift apart:
 
 1. **`ModuleManifest` versus `ModuleIdentity`.** [docs/MODULE_SPEC.md](../../docs/MODULE_SPEC.md)
    §2.1 names the type `ModuleIdentity` and exposes it as `IModule.Identity`; the code here calls it
-   `ModuleManifest` and exposes it as `IModule.Manifest`. Pick one, in the same session, and correct
-   the loser — a spec that names a type the compiler has never seen is worse than no spec.
+   `ModuleManifest` and exposes it as `IModule.Manifest`. The compiler cannot help here — both
+   names compile fine; only one of them is what the spec promises a module author. Pick one, in the
+   same session, and correct the loser.
 2. **~~The `Migrate()` return type.~~ Settled 2026-08-08 by
    [ADR 0011](../../docs/decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md).**
    The awkward return type is gone because the method is gone: migrating the *deserialized* object

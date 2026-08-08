@@ -79,8 +79,8 @@ rather than enumerating the desktop itself. Every module and pillar is two proje
 (`net9.0`, zero Windows dependencies, all the decision logic, unit-testable on any OS) and a thin
 **Shell adapter** (Windows-only P/Invoke and UI, validated by hand). Dependencies point one way:
 modules depend on the platform and the pillars; the platform never depends on a module, and no module
-depends on another. That boundary is checked mechanically from source text, so it holds even while
-the C# is uncompiled.
+depends on another. That boundary is checked mechanically from source text, so it needs no compiler
+and runs on a machine with no .NET SDK.
 
 ## 4. Glossary — use these terms exactly
 
