@@ -299,17 +299,70 @@ constantly — every layout change, every stack that crosses depth two. So:
 
 | Question | Answer |
 |---|---|
-| A new set overlaps another owner | The **update is refused** (`RegionsOverlapAnotherOwner`) |
+| A new set overlaps another owner | The **update is refused** (`RegionsOverlapAnotherOwner`), **naming the contested rectangles** |
+| Is a refusal ever partial | **No.** A set is accepted whole or refused whole. A silently-trimmed set would leave a module believing it armed regions it does not own |
 | What happens to the previous set after a refusal | **It stays active.** Silently disarming on a failed update would break cycling with no signal — the module would believe it had regions and have none |
-| Who wins an overlap | The **earlier registration**, deterministically. Conduit never silently steals a region from its current owner |
+| Who wins an overlap | See *stable priority* below. Never "whoever got there first" |
 | How an owner gives up a region | Only by updating or unregistering. There is no revocation-by-preemption |
+| Can **withdrawing** be refused | **Never.** Publishing a set that is a subset of one you already own, or the empty set, always succeeds — see *withdrawal always succeeds* below |
 | Where the topology generation comes from | **Atlas**, carried on the set by the publishing module, which got it from the snapshot it computed against. Conduit compares it with the generation it last observed from Atlas |
 
-**The queued event carries a token, not coordinates.** A dispatch carries the **opaque zone token**
-that matched and the **region-set version** it matched under — never a bare cursor position. On
-delivery the module checks the version is still current and drops the event if it is not. Without
-this, a layout change between recognition and dispatch cycles *a different zone than the one the
-user pointed at*, which is both wrong and untraceable.
+#### Stable priority — why "earlier registration wins" is not good enough
+
+Registration order is a property of **how the host happened to load modules this run**: it changes
+when a module is disabled, when one fails to load and is retried, when the registry is reordered, or
+when loading is parallelised later. An arbitration rule built on it produces a different winner on
+different runs of the same configuration, and the loser has no way to find out why. That is the same
+class of defect as an unstable sort — invisible until it matters, then impossible to reason about.
+
+The rule is instead, in order:
+
+1. **Explicit user priority.** A per-module integer in platform settings, default 0, higher wins.
+   This is the only knob, it is visible in the Shell, and it exists so an overlap the user cares about
+   has an answer the *user* chose.
+2. **Stable module identity.** Ties break on the module's permanent string id, ordinal comparison.
+   Arbitrary, and *deterministic across runs, machines and load orders*, which is the property that
+   matters. Nothing here depends on when anything registered.
+
+**Conduit still never silently steals a region from its current owner.** Priority decides who is
+*allowed* to arm a contested rectangle, and a lower-priority incumbent keeps what it holds until it
+republishes. Priority is not preemption; it decides refusals, not evictions.
+
+#### Withdrawal always succeeds
+
+Arming is a request. **Disarming is not** — a module may always publish a set that adds no rectangle
+it did not already own, and the empty set is always accepted. Without this rule a module can get
+stuck holding regions it has decided are wrong, and there is no safe state to fall back to.
+
+This is what makes a refused update recoverable rather than a dead end. The refusal names the
+contested rectangles, so the retry is a subtraction rather than a search:
+
+> **publish** → refused, with the contested rectangles → **publish the same set minus those**
+> (accepted; it adds nothing contested) → if that is somehow refused too, **publish the empty set**
+> (always accepted).
+
+Two steps, terminating, and every outcome is a state the module can describe. The cost is honest and
+local: cycling is unavailable on the contested zones, and the module knows exactly which, so it can
+say so instead of appearing broken. A consumer's version of this is
+[Zones ARCHITECTURE §7.3](../src/modules/zones/docs/ARCHITECTURE.md#73-applying-an-edit).
+
+#### The queued event carries a token, not coordinates
+
+A dispatch carries the **opaque zone token** that matched and the **region-set version** it matched
+under. On delivery the module checks the version is still current and drops the event if it is not.
+Without this, a layout change between recognition and dispatch cycles *a different zone than the one
+the user pointed at*, which is both wrong and untraceable.
+
+**The cursor position is still present — as context, never as an address.** §5.5's
+`InvocationContext` carries the cursor captured at recognition (a `Hook` origin reads it from the
+event structure, which already holds it). The distinction is what each is *for*: the token answers
+**which zone**, and it is the only thing permitted to; the cursor answers *where the pointer was*, for
+a module that wants to position an overlay or log a diagnostic. A module that re-derives a zone by
+hit-testing the cursor has reintroduced exactly the staleness the token exists to eliminate.
+
+*(This reconciles the guarantee statement in
+[ADR 0013](decisions/0013-the-pointer-gesture-trigger-kind.md), which as first written listed the
+cursor position as the payload.)*
 
 **Coalescing key: `(intent, zone token)`.** Ticks for the same zone coalesce and their deltas sum;
 ticks for different zones never coalesce with each other.
@@ -416,7 +469,7 @@ other side, and it extends past the hook to the module handler.
 
 | Stage | Thread | Bounded? | On overload |
 |---|---|---|---|
-| Recognize | the hook / OS callback | yes — table lookup + enqueue | drop, and count the drop |
+| Recognize | the hook / OS callback | yes — table lookup + **context capture** (§5.5) + enqueue | drop, and count the drop |
 | Queue | — | yes — fixed capacity, per-intent coalescing | drop the *oldest coalescible* item; never grow, never block the producer |
 | Dispatch | a dispatch worker (UI thread only for tray/menu items) | no | the module's own problem, by design |
 | Handle | the module's handler | no | overruns counted, surfaced, and eventually fault the module |
@@ -463,21 +516,100 @@ cursor" cannot be implemented at all without a module reaching for Windows itsel
 [principle 4](COORDINATOR.md#7-non-negotiable-principles) forbids, and building a focus cache from
 §3.2's coalesced hints is worse.
 
-So **every payload carries an `InvocationContext`**: cursor position, the monitor under it, the
-foreground window, the Atlas topology generation, and a monotonic stamp.
+So **every payload carries an `InvocationContext`**.
 
-**Conduit samples it; [Atlas](ATLAS.md) defines and provides it.** Conduit is on the dispatch path and
-knows when "now" is; Atlas owns what "the cursor" and "the foreground window" *mean*. Conduit asks
-Atlas for a **point sample** — three reads, deliberately not a snapshot — and stamps it on. A module
-never queries either pillar for these.
+#### The timing rule
 
-**Sampled at dispatch, not read later.** By the time a module runs the user has moved the mouse; the
-semantically correct values are the ones at the instant the input happened, and only the dispatcher is
-there at that instant. Freshness is then the *caller's* check: a module that goes on to read a full
-snapshot compares generations, and a mismatch means refuse rather than proceed on mixed data.
+> **The context is captured at recognition — the moment the event is recognized and enqueued — never
+> reconstructed at dispatch.**
+
+This is the whole point of the type, and it is worth being blunt about why the obvious alternative
+fails. §5.3's hand-off puts **Recognize** on the hook or OS callback and **Dispatch** on a worker,
+with a queue in between. A context sampled on the worker describes the world after an unbounded queue
+delay, on the far side of exactly the interval during which the user moved the mouse and switched
+windows. "Sample it at dispatch" and "give the module the state when it happened" are not compatible
+statements; the first draft of this section asserted both.
+
+**Captured, derived, reconstructed — the distinction that makes this workable:**
+
+| | Meaning | Allowed |
+|---|---|---|
+| **Captured** | Read at recognition, on the recognizing thread, into the payload | Yes — this is the mechanism |
+| **Derived** | A pure function of already-captured facts, computed later | Yes. Same answer whenever it runs, so *when* is irrelevant |
+| **Reconstructed** | A **live** source read on the worker, presented as event-time truth | **No.** This is the failure the rule exists to prevent |
+
+`MonitorUnderCursor` is *derived*: a rectangle test of a captured cursor point against the monitor
+list at a captured generation. Computing it on the worker keeps a loop off the hook thread and
+changes no answer. Reading `GetForegroundWindow()` on the worker would be *reconstruction*, and is
+forbidden however convenient the value looks.
+
+#### What each source may capture
+
+Recognition happens on different threads with different budgets, so what is capturable differs by
+source. The context names its own origin so a module can tell which guarantees it has:
+
+| Origin | Recognized on | Captures | Notes |
+|---|---|---|---|
+| **Hook** — chord, pointer gesture, input gesture | the low-level hook thread, under §5.1's budget | cursor and timestamp **from the event structure itself** (they are already in it); everything else from the **atomically-published desktop facts** — one reference read | **May not call Atlas, or anything else.** §5.2's forbidden list is not relaxed for context capture |
+| **OS callback** — window event | a callback thread with no microsecond budget | a live Atlas point sample at recognition | The one origin where "sample now" is both allowed and accurate |
+| **UI** — tray action, menu item | the UI thread | a live point sample, plus the invoking menu item | Cursor is where the user clicked the menu, which is what they mean |
+| **Timer** — schedule | a timer thread | **no cursor and no foreground at all** | A 25-minute tick has no event-time cursor. The fields are null and `Origin` says why — not a fabricated "wherever the mouse happens to be" |
+
+#### The published desktop facts
+
+Hook-thread capture reads one immutable record, republished by [Atlas](ATLAS.md) whenever the
+foreground window or the topology changes:
+
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record DesktopFacts(
+    WindowRef? ForegroundWindow,
+    IReadOnlyList<MonitorGeometry> Monitors,
+    int TopologyGeneration,
+    long PublishedAtTicks);
+```
+
+**Publication follows §3.6's contract exactly** — immutable value, atomic reference swap, Conduit owns
+the lifetime, the reader never blocks. It is deliberately the same mechanism as the armed region set
+rather than a second one: there is one way in this pillar to hand data to the hook thread.
+
+#### Facts that are unavailable are null, and facts that are cached say when
+
+```csharp
+// SKETCH — illustrative, not compiled.
+enum ContextOrigin { Hook, OsCallback, UserInterface, Timer }
+
+sealed record InvocationContext(
+    ContextOrigin Origin,
+    long CapturedAtTicks,            // monotonic, at recognition
+    Point? CursorPosition,           // PhysicalVirtualScreen; null for Timer
+    WindowRef? ForegroundWindow,     // null when there is none, or none resolvable
+    int TopologyGeneration,
+    long FactsPublishedAtTicks);     // Hook origin: how old the cached facts were. Else == CapturedAtTicks
+```
+
+Two honesty requirements the shape enforces:
+
+- **Nullable means "there may not be one", not "we did not bother".** A null foreground window is
+  ordinary — the desktop itself can have focus, and an elevated or secure window may not be
+  resolvable.
+- **A cached fact carries its own age.** On a `Hook` context, `ForegroundWindow` is true as of
+  `FactsPublishedAtTicks`, not as of `CapturedAtTicks`, and the payload says so rather than implying a
+  freshness it does not have. Conduit marks a context `ContextStale` when that gap exceeds a bound —
+  which in practice means Atlas's publication has broken, since foreground changes republish
+  immediately.
+
+**Dispatch stamps a second time, and only a second time.** The payload also carries
+`DispatchedAtTicks`, so a module can see how long it sat in the queue and refuse work that has gone
+cold — without reading a clock in its handler, and without any part of the *context* being rewritten.
+Every field above is frozen at recognition.
+
+**Freshness against a full snapshot is still the caller's check.** A module that goes on to read an
+Atlas snapshot compares `TopologyGeneration`; a mismatch means refuse rather than proceed on mixed
+data.
 
 Refusals are values as everywhere else: `NoForegroundWindow`, `ForegroundNotManageable`,
-`NoMonitorUnderCursor`, `ContextStale`.
+`NoMonitorUnderCursor`, `NoCursorForOrigin`, `ContextStale`.
 
 ### 5.6 One interaction, one stream
 

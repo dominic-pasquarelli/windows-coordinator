@@ -1,7 +1,9 @@
 # ADR 0016 — A stack member carries state, and reconciliation is generation-aware
 
 Date: 2026-08-08
-Status: Accepted
+Status: Accepted · **Extended by [ADR 0019](0019-layout-edits-are-a-transaction.md)** — `PlacedAtGeneration`
+becomes `GeometryStamp PlacedUnder`, a pair of (topology generation, layout revision), so a layout
+edit is detectable by the same rule as a monitor change.
 
 ## Context
 
@@ -42,6 +44,10 @@ sealed record StackMember(
     int PlacedAtGeneration);  // the Atlas topology generation it was placed under
 ```
 
+> **Amended by [ADR 0019](0019-layout-edits-are-a-transaction.md):** the last field is
+> `GeometryStamp PlacedUnder` — `(TopologyGeneration, LayoutRevision)`. Topology alone cannot see a
+> layout edit, which changes the geometry a cell id refers to while changing no monitor.
+
 ### 2. Stored order is the **cycle ring**, not a claim about what is visible
 
 The list says what order cycling walks. It does **not** assert which window is in front. That is read
@@ -68,6 +74,10 @@ bounds testing resumes only after a placement under the current generation. This
 [ATLAS §4.1](../ATLAS.md#41-topology-generation)'s existing rule — geometry computed at generation N
 must not be judged at N+1 — applied to membership rather than only to rectangles. **Case 4.**
 
+> **Amended by [ADR 0019](0019-layout-edits-are-a-transaction.md):** the comparison is over the whole
+> `GeometryStamp`, and **either component differing** suppresses the bounds test. One rule then covers
+> a monitor change and a layout edit, with no separate "was this cell edited?" path.
+
 ### 5. Cycling to a minimised member restores it
 
 `Show(window)` = restore-if-minimised, then raise. Cycling calls `Show`, not `Raise`, so it can never
@@ -77,10 +87,17 @@ window's state on the way past is the surprise this design avoids elsewhere. **C
 ### 6. `stackOnDrop = false` **swaps**; it does not evict into limbo
 
 The displaced occupant goes where the incoming window came from — its previous zone if it had one,
-otherwise its pre-drag bounds, both of which Zones already knows because it initiated the drag. When
-neither is available (a window dragged in from nowhere Zones was tracking), the occupant is unmanaged
-and **left in place**, and that outcome is recorded as `Displaced` so the surface can say so rather
-than leaving a window mysteriously stacked under another. **Case 5.**
+otherwise its pre-drag bounds, both of which Zones already knows because it initiated the drag.
+**Case 5.**
+
+> **Completed by [ADR 0020](0020-dormant-stacks-and-the-displacement-rules.md).** This rule as written
+> covers one occupant, from nowhere in particular, with the displacement assumed to succeed — and
+> ended by admitting a case where the occupant is left unmanaged and *recorded as `Displaced`*, which
+> names the bad outcome rather than removing it. ADR 0020 defines the rest: only the **front** member
+> is displaced (the setting is a drop policy, not a depth invariant), a swap between two managed zones
+> **exchanges ring positions**, a same-zone drop displaces nothing, and a **refused** displacement
+> leaves the occupant in the destination ring behind the incoming window. There is no orphan left to
+> name, so there is no `Displaced` state.
 
 ## Consequences
 

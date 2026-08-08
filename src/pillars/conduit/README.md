@@ -22,7 +22,7 @@ related:
 > is [docs/CONDUIT.md](../../../docs/CONDUIT.md). The declarations **compile**; the arbiter that
 > gives them meaning is unwritten.
 
-## Status: contract types written, never compiled
+## Status: declarations compile; the arbiter that gives them meaning is unwritten
 
 `Coordinator.Conduit.Core/` exists. It holds `Coordinator.Conduit.Core.csproj` and three source
 files — the **declaration** half of the pillar:
@@ -37,9 +37,11 @@ files — the **declaration** half of the pillar:
 registry, no arbiter, no interface a module registers through, and no dispatcher — so the behaviour
 this pillar exists for, central conflict arbitration, has not been written.
 
-And none of it has been through a compiler. The C# here was authored in an environment with **no
-.NET SDK** (**TD-1** in [docs/TECH_DEBT.md](../../../docs/TECH_DEBT.md)), so CI was its first
-reader. It compiles: GitHub Actions at `7aef6ff` (2026-08-08) — Ubuntu and Windows, 0 warnings under `TreatWarningsAsErrors`.
+The C# here was authored in an environment with **no .NET SDK** (**TD-1** in
+[docs/TECH_DEBT.md](../../../docs/TECH_DEBT.md)), so CI was its first reader. It compiles: GitHub
+Actions at `7aef6ff` (2026-08-08) — Ubuntu and Windows, 0 warnings under `TreatWarningsAsErrors`.
+Nothing here has been compiled on a developer machine, and **no hook has ever been installed and no
+chord has ever been registered**.
 
 **It has no tests, and that is the honest gap here** — unlike Atlas, this pillar's interesting logic
 (the arbiter that decides who gets a contested chord) is not written yet, so there is nothing to

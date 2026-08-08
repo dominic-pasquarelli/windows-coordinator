@@ -7,6 +7,8 @@ updated: 2026-08-08
 audited: 2026-08-08
 related:
   - src/modules/zones/docs/ARCHITECTURE.md
+  - docs/decisions/0019-layout-edits-are-a-transaction.md
+  - docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md
   - docs/MODULE_SPEC.md
   - docs/ATLAS.md
   - docs/CONDUIT.md
@@ -29,8 +31,8 @@ Nothing in this directory is implemented. What exists is the design —
 
 | | State |
 |---|---|
-| Internal design ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | **done** — addressing, occupancy and member states, stacking, cycling, reconciliation, the layout designer, dragons |
-| Decisions (ADR 0012 – 0018) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing |
+| Internal design ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | **done** — addressing, occupancy and member states, dormancy, stacking, cycling, reconciliation, the layout designer, dragons |
+| Decisions (ADR 0012 – 0020) | **done** — stacking, the pointer-gesture kind, raise/activate, zone addressing, member states, invocation context, layout editing, edits as a transaction, dormancy and displacement |
 | `Coordinator.Zones.Core` | **TODO** — not created. `coord new-module zones` adds it around these docs |
 | `Coordinator.Zones.Shell` (the drag overlay) | **TODO** — not created |
 | Core tests | **TODO** — not created |
@@ -56,6 +58,12 @@ has to say what happens to the stacks addressed by the cells it changes. Split k
 first fragment; merge keeps the first cell's id in reading order, retires the rest permanently, and
 concatenates their stacks into the survivor.
 
+**Which is why an edit is a transaction, not a new template.** Each operation returns the new
+template *and* its bumped revision, the cell remapping, the retired ids, the transformed occupancy,
+and a placement for every geometrically affected window — including windows in a cell whose id did
+not change, which is exactly the case id stability hides
+([ADR 0019](../../../docs/decisions/0019-layout-edits-are-a-transaction.md)).
+
 ## The two things worth knowing before you read the design
 
 **1. Stacking is z-order, not minimising.** Every window in a stack sits at the same rectangle;
@@ -80,7 +88,7 @@ forces, is [ARCHITECTURE §3](docs/ARCHITECTURE.md#3-cycling-and-the-gesture-pro
 
 ## Decisions that shaped this module
 
-The unified log is [`docs/decisions/`](../../../docs/decisions/). The seven that govern Zones:
+The unified log is [`docs/decisions/`](../../../docs/decisions/). The nine that govern Zones:
 
 - **[ADR 0012](../../../docs/decisions/0012-zones-stacking-model.md)** — a zone holds an ordered
   stack; stacking is z-order; membership is intent reconciled against the desktop; stacks are
@@ -100,6 +108,12 @@ The unified log is [`docs/decisions/`](../../../docs/decisions/). The seven that
   dispatch carries an invocation context, and a drag has exactly one lifecycle.
 - **[ADR 0018](../../../docs/decisions/0018-layout-editing-grid-split-merge.md)** — the layout
   designer: grid, split and merge as pure operations, and what happens to cell ids.
+- **[ADR 0019](../../../docs/decisions/0019-layout-edits-are-a-transaction.md)** — an edit is one
+  transaction over template, occupancy and placement, and geometry is stamped by
+  `(topology generation, layout revision)` so a split re-places its own windows.
+- **[ADR 0020](../../../docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md)** — an
+  absent monitor makes a stack dormant rather than unassigned, and a refused displacement degrades to
+  a stack rather than an orphan.
 
 ## Where to resume
 
@@ -118,7 +132,10 @@ When they close, the first action in this directory:
 Then, in order:
 
 1. **Armed-region computation**, with the test that a zone leaves the set when its depth drops below
-   two. That test is what stops `Win`+wheel swallowing scroll events over ordinary windows.
+   two. That test is what stops `Win`+wheel swallowing scroll events over ordinary windows. Then the
+   refusal path — a refused publication leaves the previous set active, and the empty set is always
+   accepted — because §7.3's recovery is built on that guarantee and a guarantee nobody has seen hold
+   is decoration.
 2. **The Atlas raise path** (ADR 0014) and manual-validation row `Z-4` — the foreground lock is the
    module's largest unknown and the cheapest thing to find out. Do it before building the overlay,
    not after: if activation is refused in a way that cannot be worked around, the *design* absorbs it

@@ -487,8 +487,8 @@ related:
 
 ## Status
 
-Nothing here has been compiled or run. Replace this table as reality changes — a stale status table
-is the most invisible kind of drift there is (docs/AUDIT.md, Lens A).
+Nothing in this directory has been built or run. Replace this table as reality changes — a stale
+status table is the most invisible kind of drift there is (docs/AUDIT.md, Lens A).
 
 | | State |
 |---|---|
@@ -612,8 +612,9 @@ CORE_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
        The boundary check reads those as text and fails the gate.
        Shared properties (nullable, LangVersion, warnings-as-errors) come from Directory.Build.props.
        NOTE: this template's output is checked by tools/coord/tests/test_scaffold.py, which
-       scaffolds a module and asserts every ProjectReference it emits resolves. It has not been
-       compiled — no scaffolded module has ever been built. -->
+       scaffolds a module and asserts every ProjectReference it emits resolves. That check is
+       textual: the generated project has never been compiled, because no scaffolded module has
+       ever been built. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -637,8 +638,9 @@ SHELL_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
        Add the Windows App SDK package reference only when this module actually renders its own UI —
        the generic settings page comes free from declared capabilities.
        NOTE: this template's output is checked by tools/coord/tests/test_scaffold.py, which
-       scaffolds a module and asserts every ProjectReference it emits resolves. It has not been
-       compiled — no scaffolded module has ever been built. -->
+       scaffolds a module and asserts every ProjectReference it emits resolves. That check is
+       textual: the generated project has never been compiled, because no scaffolded module has
+       ever been built. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
@@ -686,8 +688,11 @@ def _cs_placeholder(cls: str, name: str, kind: str, body: str) -> str:
     return f"""// {cls}{kind} — SCAFFOLD PLACEHOLDER, intentionally empty of code.
 //
 // This file exists so the module's shape is right from the first commit; it deliberately contains
-// no implementation, because a generated stub that references types nobody has compiled is worse
-// than an honest blank. Nothing in this repository has ever been through a C# compiler.
+// no implementation, because a generated stub is a guess at an interface you have not read yet.
+//
+// The platform contract this module implements compiles and its Core logic is tested (CI, 7aef6ff)
+// — but no module has ever been scaffolded, built, or run, and nothing in this repository has run
+// on Windows. Delete this banner when that stops being true.
 //
 {wrapped}
 //
@@ -861,8 +866,8 @@ docs/MODULE_SPEC.md:
 
 Then run:  coord test  ·  coord audit  ·  coord map --check
 """)
-    warn("the .csproj files just written have never been restored or built — no C# in this "
-         "repository has been through a compiler.")
+    warn("the .csproj files just written have never been restored or built — this template's "
+         "output has never been through a compiler. Run `coord build` before trusting it.")
     return EXIT_OK
 
 

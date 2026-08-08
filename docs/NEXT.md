@@ -82,8 +82,8 @@ are resuming and the run was green, say so with the date; if it was red, the err
 
 **What does not exist — and this is the part that matters now that it compiles.** There is **no
 module code.** Zones (M1) is now **fully designed** —
-[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0018
-settle its seven non-obvious decisions — but not one line of it is written, and its code projects are
+[src/modules/zones/](../src/modules/zones/README.md) holds its architecture, and ADRs 0012–0020
+settle its nine non-obvious decisions — but not one line of it is written, and its code projects are
 deliberately not scaffolded. Chrono (M2) is still a roadmap entry only. There is **no Shell adapter**, so
 not one line of Windows-facing code exists in this repository. There is **no solution file** (`.sln`
 files carry GUIDs that cannot be verified in a container; generating it is step 2 below).
@@ -247,22 +247,31 @@ DPI is closed by the runbook or it is not closed.
 
 The first real module and the first outside consumer of both pillars. **Fully designed** — read
 [src/modules/zones/docs/ARCHITECTURE.md](../src/modules/zones/docs/ARCHITECTURE.md) before writing a
-line, and note that Zones needs one extension from each pillar (ADR 0013, ADR 0014) which are
-specified but unbuilt.
+line, and note that Zones needs extensions from both pillars which are specified but unbuilt:
+**Conduit** gains the pointer-gesture kind and its arbitration (ADR 0013) and the recognition-time
+invocation context (ADR 0017); **Atlas** gains explicit raise/show/activate (ADR 0014) and the
+published `DesktopFacts` record that hook-thread capture reads.
 
 **Pure logic first, placement second, Windows last** — the ordering is deliberate: the interesting
 parts are pure and host-testable, so proving them before any window moves means that when placement
 misbehaves you already know the model is not the cause.
 
-1. **The occupancy model** — `ZoneAddress`, `StackMember` states, assign, cycle, and `Reconcile`,
-   with the three invariants written as failing tests first. This is the whole module; everything
-   below is plumbing around it. Start with the same template on two monitors — the case the first
-   design could not represent (ADR 0015, ADR 0016).
-1b. **The layout designer** — `Grid`, `Split`, `Merge` as pure operations, with merge's
-   tiles-its-bounding-box predicate tested exhaustively over a 3×3 grid, and the cell-id survival
-   rules from ADR 0018. Pure arithmetic, no UI, no desktop.
+1. **The occupancy model** — `ZoneAddress`, `StackMember` states, `GeometryStamp`, assign, cycle, and
+   `Reconcile`, with the three invariants written as failing tests first. This is the whole module;
+   everything below is plumbing around it. Start with the same template on two monitors — the case the
+   first design could not represent (ADR 0015, ADR 0016). Then the two edge clusters ADR 0020 closes:
+   **dormancy** (a monitor leaving the snapshot, and the `Positional`-match case that must *not* wake
+   a stack) and the six **displacement** rows of ARCHITECTURE §6.1.
+1b. **The layout designer** — `Grid`, `Split`, `Merge`, each returning a **`LayoutEdit` transaction**
+   rather than a template (ADR 0019), with merge's tiles-its-bounding-box predicate tested
+   exhaustively over a 3×3 grid and the cell-id survival rules from ADR 0018. The tests that matter
+   most are the ones asserting a split and a merge **re-place members whose cell id did not change** —
+   a template-only assertion passes while the windows sit at the old size. Pure arithmetic, no UI, no
+   desktop.
 2. **Armed-region computation**, with the test that a zone leaves the armed set the moment its depth
-   drops below two — the test that stops `Win`+wheel swallowing scroll over ordinary windows.
+   drops below two — the test that stops `Win`+wheel swallowing scroll over ordinary windows — and the
+   refusal path (previous set stays active · subtraction retry accepted · empty set always accepted),
+   which is what §7.3's recovery is built on.
 3. **Settings shape** and its migration path, before any UI.
 4. **The Atlas raise path** (ADR 0014) and manual-validation `Z-4` — *do this early*. The foreground
    lock is the module's largest unknown and among the cheapest to resolve; the design already

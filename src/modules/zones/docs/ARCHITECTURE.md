@@ -17,6 +17,8 @@ related:
   - docs/decisions/0016-zone-occupancy-member-states.md
   - docs/decisions/0017-invocation-context-and-one-drag-lifecycle.md
   - docs/decisions/0018-layout-editing-grid-split-merge.md
+  - docs/decisions/0019-layout-edits-are-a-transaction.md
+  - docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md
   - docs/runbooks/manual-validation.md
 ---
 
@@ -67,12 +69,17 @@ readonly record struct ZoneAddress(MonitorKey Monitor, string LayoutId, string C
 
 enum MemberState { Placed, Minimized, Oversized, AwaitingReplacement }
 
+// Geometry is stamped by a pair, never by topology alone (ADR 0019). A monitor change bumps the
+// first component; a layout edit bumps the second. Either differing means "the geometry this was
+// placed against no longer exists", which is the only question the reconciler needs to ask.
+readonly record struct GeometryStamp(int TopologyGeneration, int LayoutRevision);
+
 sealed record StackMember(
     WindowRef Window,
     MemberState State,
     Rect PlacedBounds,        // what we asked for
     Rect ObservedBounds,      // what we actually got (may differ — PlacedDifferently)
-    int PlacedAtGeneration);  // the Atlas topology generation it was placed under
+    GeometryStamp PlacedUnder);
 
 sealed record ZoneOccupancy(IReadOnlyDictionary<ZoneAddress, IReadOnlyList<StackMember>> Stacks);
 ```
@@ -97,10 +104,18 @@ a bug with no correct answer. Treating it as intent means every disagreement has
 resolution: the desktop wins about what exists, the user's intent wins about where things go.
 
 **Why a member carries state.** A bare `WindowRef` cannot express *minimised but still a member*,
-*placed but clamped to a size we did not ask for*, or *placed under a topology that no longer
+*placed but clamped to a size we did not ask for*, or *placed under a geometry that no longer
 exists* — and each of those is a real transition with a different correct answer. The first draft of
 this design used a bare list and had five transitions with no representable resolution; they are §5's
 table now.
+
+**And why the stamp is a pair.** Split and merge deliberately *preserve* a cell id (§7.1) while
+changing the rectangle that id refers to, and they change no monitor. Stamped with the topology
+generation alone, a member of a just-split cell has an address that still resolves under a generation
+that still matches — so reconciliation concludes everything is fine while the window sits at the old,
+now-wrong size. `LayoutRevision` is what makes that transition detectable
+([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)); it is the same class
+of fix as the member states themselves.
 
 ### 2.1 Why stacking is z-order, and not minimising
 
@@ -145,6 +160,17 @@ So the decision must be answerable **without asking Zones anything**:
 > two or more windows — and republishes it whenever occupancy or layout changes. Conduit's hook
 > tests the cursor against that set and nothing else. Match plus modifier held → swallow the event
 > and queue a dispatch. Anything else → pass through, untouched, immediately.
+
+**The dispatch names the zone; it does not describe the pointer.** What arrives is the **zone token**
+that matched and the **region-set version** it matched under. Zones checks the version is current and
+drops the event if it is not — otherwise a layout change between the wheel tick and the dispatch
+cycles a different zone than the one under the user's cursor. The cursor position is on the
+invocation context and is for positioning and diagnostics only; **re-deriving the zone by hit-testing
+it would reintroduce exactly the staleness the token removes**
+([CONDUIT §3.6](../../../../docs/CONDUIT.md#36-pointer-gesture)).
+
+**And republishing can be refused** — another module may hold an overlapping region with the same
+modifier. The recovery path, and why it never rolls back a layout edit, is §7.3.
 
 This is [principle 7](../../../../docs/COORDINATOR.md#7-non-negotiable-principles) — *resolve once,
 execute cheap* — in its sharpest form: all the thinking happens when a layout or a stack changes,
@@ -238,21 +264,29 @@ each row below is a case the first draft of this design could not represent
 | Window is no longer in the snapshot | Drop it. Closing a window leaves the zone. |
 | Window's bounds differ from **`ObservedBounds`** beyond tolerance | The user moved it out by hand. Drop it. |
 | Window was placed but came back a different size (`PlacedDifferently`) | **Stays.** Mark `Oversized`, and record `ObservedBounds` as what we actually got — which is why membership is tested against that and never against the zone rectangle. |
-| `snapshot.TopologyGeneration != member.PlacedAtGeneration` | **Do not run the bounds test at all.** Mark `AwaitingReplacement` and re-place against the re-resolved zone; testing resumes only after a placement under the current generation. |
+| **Either component** of `member.PlacedUnder` differs from the current `GeometryStamp` | **Do not run the bounds test at all.** Mark `AwaitingReplacement` and re-place against the re-resolved zone; testing resumes only after a placement under the current stamp. One comparison covers a monitor change *and* a layout edit ([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)). |
 | Window is minimised | Keep it, mark `Minimized`. Minimising is not leaving, and cycling to it will `Show` it. |
 | Another window is frontmost than the ring implies (taskbar click, Alt-Tab) | **Nothing to do.** Ring order is not a claim about visibility; the next cycle continues from whatever is actually in front. |
-| A zone address no longer exists (layout edited or switched) | Its windows become unassigned — unless an edit preserved the region, in which case §7's rules move the ring instead. |
+| A zone's **monitor is not in the snapshot** (unplugged, undocked) | **The stack goes dormant** — kept, ordered, unplaced, untested, unarmed. It is *not* unassigned; that would discard the layout at the moment it is least recoverable. §5.3. |
+| A zone address no longer exists (**layout switched** on a monitor that is present) | Its windows become unassigned. The screen is there and the region is unclaimed, which is a different situation from the row above. |
+| A zone address no longer exists (layout **edited**) | **The reconciler never sees this.** An edit is a transaction that has already remapped the rings and produced the placements (§7.3); by the time the reconciler runs, occupancy addresses only surviving cells. |
 
 **The tolerance is a contract detail, not a rounding fudge.** A window's reported `Bounds` include an
 invisible resize border, so membership compares `VisibleBounds`
 ([ATLAS §3](../../../../docs/ATLAS.md#3-the-model)) against `ObservedBounds` with a tolerance.
 
-### 5.1 Why the generation rule matters more than it looks
+### 5.1 Why the stamp rule matters more than it looks
 
 Without it, a monitor being unplugged reads as *the user dragged every window out of every zone
 simultaneously*, and the whole layout is discarded at exactly the moment geometry is least
 trustworthy. [ATLAS §4.1](../../../../docs/ATLAS.md#41-topology-generation) already says geometry
 computed at generation N must not be applied at N+1; this applies the same rule to **membership**.
+
+The second component generalises it to the module's own geometry. Atlas owns the topology generation
+and it means *the desktop changed shape*; Zones owns `LayoutRevision` and it means *this template
+changed shape*. Keeping them as two fields rather than one counter is what stops a module
+incrementing a pillar's counter, and what stops every other Atlas consumer re-placing geometry
+because Zones edited its settings.
 
 ### 5.2 The consequence of `PlacedDifferently` on a stack
 
@@ -261,6 +295,30 @@ window behind it peeks out. This looks like a bug and is not one: it is an appli
 right it has. The design **surfaces rather than fights** — `Oversized` is observable state, and
 repeated resize attempts would produce a flickering window and an application in a state its author
 never anticipated.
+
+### 5.3 Dormancy — the difference between "gone" and "not here right now"
+
+A stack whose monitor is absent from the snapshot is **dormant**
+([ADR 0020](../../../../docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md)). Dormancy
+is a property of the *address* — the `MonitorKey` does not resolve — so there is no member state to
+keep in sync and no way for a member to disagree with its stack about it.
+
+While dormant, reconciliation **keeps the ring and its order, and drops only members whose window has
+closed** (which needs no geometry to detect). It runs no bounds test: Windows itself relocated those
+windows when the screen went away, so the test would read "the user dragged them all out" and be
+wrong about every one. It places nothing, and the zone has no rectangle so it cannot be in the armed
+region set — that one falls out rather than needing a rule.
+
+**Waking up requires a match good enough to trust.** When the `MonitorKey` resolves again, every
+member becomes `AwaitingReplacement` and is re-placed under the current stamp — the ordinary path. But
+a `Positional`-only match, which [ADR 0015](../../../../docs/decisions/0015-zone-addressing-and-durable-monitor-identity.md)
+says may be a different physical screen, does **not** wake it. That monitor gets the default layout
+and says so; the stack keeps waiting. Doing nothing visible is recoverable, and flinging a stack of
+windows onto a screen the user never associated with them is not.
+
+Dormant entries are bounded by occupancy being session-scoped
+([ADR 0012](../../../../docs/decisions/0012-zones-stacking-model.md)): a monitor that never comes back
+costs one dictionary entry until exit.
 
 ## 6. Drag to snap
 
@@ -277,12 +335,28 @@ than documenting it ([ADR 0017](../../../../docs/decisions/0017-invocation-conte
 **On drop, the window joins the stack at the front** (the M1 default) — which is what makes stacks
 emerge from ordinary use rather than requiring a separate thing to learn.
 
+### 6.1 `stackOnDrop = false` — the swap, fully specified
+
 **With `stackOnDrop = false`, the drop *swaps*.** The displaced occupant goes where the incoming
-window came from — its previous zone if it had one, otherwise its pre-drag bounds, both of which
-Zones knows because it owned the drag. Only when neither is available is the occupant unmanaged and
-left in place, recorded as `Displaced` so the surface can say so. The rejected alternative — remove
-it from the model and leave it sitting in the same rectangle — produces an unmanaged window hidden
-under a managed one, which is the exact bug the setting exists to avoid.
+window came from. Every case is named, because the intuitive version of this rule covers exactly one
+of them ([ADR 0020](../../../../docs/decisions/0020-dormant-stacks-and-the-displacement-rules.md)):
+
+| Case | Result |
+|---|---|
+| Destination ring holds **two or more** | **Only the front member is displaced.** The rest of the ring is untouched |
+| Incoming window came **from another zone Zones manages** | The occupant takes **the exact ring position the incoming window vacated**. Both rings keep their depth and their order |
+| Incoming window came **from the same zone** | No displacement at all — it moves to the front of its own ring |
+| Incoming window was **not managed** | The occupant goes to the incoming window's pre-drag bounds, which Zones knows because it owned the drag |
+| Placing the occupant is **`Refused`** | It **stays in the destination ring, behind the incoming window**, and the outcome is recorded. A stack the user did not ask for is visible and cyclable; an unmanaged window hidden under a managed one is the bug this setting exists to avoid |
+| Placing the occupant is **`PlacedDifferently`** | Not a failure. It is a member of its new zone, marked `Oversized`, as after any placement |
+
+**The setting is a rule about drops, not an invariant about depth** — worth stating because the
+opposite reading is natural and would be written as an assertion. A ring of two or more can exist
+with the setting off: built while it was on, built by `zones.snap-focused` on a chord, or left over
+from before it was changed. Nothing may assume depth ≤ 1, and turning the setting off never
+retroactively unstacks anything.
+
+### 6.2 The overlay
 
 **The overlay is the module's only Shell surface,** and it lives in `Coordinator.Zones.Shell` rather
 than in the platform — the "would a second, unrelated module need this?" test says *maybe eventually*
@@ -293,7 +367,7 @@ drag.
 ## 7. The layout designer
 
 Authoring a layout by typing fractions is not something anyone does twice. Three operations, all
-**pure functions over a `LayoutTemplate`** and therefore all host-tested with no desktop
+**pure** and therefore all host-tested with no desktop
 ([ADR 0018](../../../../docs/decisions/0018-layout-editing-grid-split-merge.md)):
 
 | Operation | What it does |
@@ -306,6 +380,35 @@ The arithmetic is the easy half. The part worth designing is what happens to **c
 cell id is a permanent contract — occupancy addresses it (§2) and settings reference it. An editor
 that mints fresh ids scatters every stack on every edit, which is how you end up with an editor
 nobody uses.
+
+**But that is also why an edit cannot be a function from `LayoutTemplate` to `LayoutTemplate`.** Each
+operation takes the template *and* the occupancy over it, and returns one transaction
+([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)) — or a refusal:
+
+```csharp
+// SKETCH — illustrative, not compiled.
+sealed record LayoutEdit(
+    LayoutTemplate Template,                          // the new template
+    int LayoutRevision,                               // bumped; monotonic per template
+    IReadOnlyDictionary<string, string> CellRemap,    // old cell id -> surviving cell id
+    IReadOnlyList<string> RetiredCellIds,             // never reissued
+    ZoneOccupancy Occupancy,                          // already transformed
+    IReadOnlyList<PlacementAction> Placements);       // every geometrically affected member
+
+LayoutEdit Grid(LayoutTemplate t, ZoneOccupancy occ, MonitorKey monitor, int columns, int rows);
+Result<LayoutEdit> Split(LayoutTemplate t, ZoneOccupancy occ, MonitorKey m, string cellId, Axis a, double f);
+Result<LayoutEdit> Merge(LayoutTemplate t, ZoneOccupancy occ, MonitorKey m, IReadOnlyList<string> cellIds);
+```
+
+The six outputs are produced together because they are one decision: you cannot know which members
+need re-placing without knowing how cells were remapped, and you cannot remap rings without knowing
+which ids survived. **Every geometrically affected member gets a `PlacementAction` — including
+members of a ring whose cell id did not change**, which is the case id stability exists to create and
+therefore the case it hides.
+
+An edit is applied to the module's state in **one step or not at all**: template, revision, occupancy
+and armed regions move together. A new template with the old occupancy, or new geometry with stale
+armed regions, is the state this makes unrepresentable.
 
 ### 7.1 Identity through an edit
 
@@ -333,11 +436,47 @@ The rejected alternative was to auto-repair a non-contiguous selection by taking
 deleting whatever was inside it. That silently destroys cells the user did not select — data loss
 dressed as convenience.
 
-### 7.3 Editing is a settings-save, not a live mutation
+### 7.3 Applying an edit
 
-An edit produces a new template and goes through the ordinary settings path. Occupancy is then
-reconciled against it by §5's reconciler; cells that vanished entirely release their windows as
-unassigned rather than moving them somewhere nobody chose.
+An edit is committed through the ordinary settings path — it is a settings-save, not a live
+mutation — but what is saved is the whole transaction, not just the template. In order:
+
+1. **Persist** the new template *and* its bumped `LayoutRevision`. Without the revision on disk, an
+   edit made in one session is indistinguishable from a fresh load in the next.
+2. **Swap in** the transformed `ZoneOccupancy`. Rings have already been remapped by `CellRemap`;
+   rings whose cells were retired have already been concatenated into their survivor (§7.1). Windows
+   in a cell that vanished with no survivor are unassigned by the transaction — they are not left
+   for the reconciler to discover.
+3. **Republish** the armed region set against the new geometry, before any placement runs.
+4. **Execute** the `PlacementAction` list, stamping each placed member with the new `GeometryStamp`.
+
+**Step 3 can be refused, and that must not roll back steps 1–2.** Another module may hold an
+overlapping region with the same modifier ([CONDUIT §3.6](../../../../docs/CONDUIT.md#36-pointer-gesture)),
+in which case Conduit refuses the whole set and names the contested rectangles. Refusing the *user's
+layout edit* over that would be absurd — the two have nothing to do with each other — so Zones takes
+the subtraction path the pillar guarantees:
+
+> republish → refused with contested rectangles → **republish the same set minus those** (accepted;
+> it adds nothing contested) → if even that is refused, **publish the empty set** (always accepted).
+
+The edit stands. What degrades is cycling, on exactly the zones named in the refusal — and because
+Zones knows which, the designer can mark them rather than leaving a zone that silently ignores the
+wheel. `zones.cycle-forward` / `cycle-back` remain bound to chords and are unaffected (§8.1), which
+is the second reason those exist.
+
+**Withdrawal is what makes this safe.** A subset publication cannot be refused, so the retreat path
+always terminates and there is always a representable state. The alternative — a module stuck holding
+armed regions that describe geometry it no longer has — is the partially-applied edit this section
+exists to prevent, arriving through the back door.
+
+**A placement may still fail individually** (`Refused`, `PlacedDifferently`), and that is reported
+per member rather than failing the edit. The template change has already been decided by the user;
+an application refusing to resize is not a reason to reject their layout. Those members reconcile
+through §5's table exactly as they would after any other placement.
+
+The reconciler is therefore *not* the mechanism that repairs a layout edit — by the time it next
+runs, occupancy already addresses only surviving cells and every affected member is stamped. It is
+the mechanism that notices the desktop disagreeing afterwards.
 
 ---
 
@@ -371,22 +510,32 @@ foreground dragon or the hook budget turns out worse than expected, the module s
 | Intent | Purpose |
 |---|---|
 | Hotkey chord | snap, cycle forward/back, next layout |
-| Window event (`MoveSizeStart`/`End`) | drag detection |
-| Input gesture (drag + modifier) | overlay lifecycle |
+| Input gesture (drag + modifier) | **the whole drag** — detection, overlay lifecycle, and the dragged window, from one stream |
 | **Pointer gesture** (modifier + wheel over armed regions) | cycling — the new kind, §4.1 |
 
+**Three, not four.** The first draft also subscribed to the window-event pair
+`MoveSizeStart`/`MoveSizeEnd` for drag detection, alongside the gesture. Conduit defines no ordering
+between intent streams, so cleanup ownership was ambiguous and "which arrived first" was undefined
+([ADR 0017](../../../../docs/decisions/0017-invocation-context-and-one-drag-lifecycle.md), §6). The
+gesture payload already carries the dragged `WindowRef` — Conduit owns the hook and knows which window
+is in a move/size loop — so the second stream bought nothing and cost a race. The window-event kind
+remains in the taxonomy for consumers that want raw move/size transitions; Zones is not one.
+
 Every one of these is a **request that can be refused**. A chord may already be held by another
-module or by Windows itself; the pointer gesture may be refused if another module has armed an
-overlapping region. Zones must remain useful when refused — which is why the wheel and the chords are
-alternative paths to the same capability rather than one depending on the other.
+module or by Windows itself; the pointer gesture may be refused if another module holds an
+overlapping region (§7.3). Zones must remain useful when refused — which is why the wheel and the
+chords are alternative paths to the same capability rather than one depending on the other.
 
 ### 8.3 Settings, v1
 
 ```jsonc
 {
   "schemaVersion": 1,
-  "layouts": [ { "id": "…", "name": "…", "cells": [ … ], "padding": 8, "gap": 8 } ],
-  "monitorLayouts": { "<monitor id>": "<layout id>" },
+  "layouts": [
+    { "id": "…", "name": "…", "layoutRevision": 3, "cells": [ … ],
+      "retiredCellIds": [ … ], "padding": 8, "gap": 8 }
+  ],
+  "monitorLayouts": { "<MonitorKey>": "<layout id>" },
   "snapModifier": "Shift",
   "cycleModifier": "Win",
   "stackOnDrop": true,
@@ -397,11 +546,18 @@ alternative paths to the same capability rather than one depending on the other.
 Additive by default; a structural change ships an `ISettingsMigration`
 ([ADR 0011](../../../../docs/decisions/0011-settings-migrate-the-persisted-document-not-the-deserialized-object.md)).
 
-**`monitorLayouts` is keyed by monitor id, and monitor identity across reconfiguration is an open
-Atlas question** ([ATLAS §10](../../../../docs/ATLAS.md#10-open-questions-and-known-dragons)). Undock
-a laptop and dock it again and the ids may not match, in which case a user's per-monitor layouts
-silently fail to apply. Zones must not paper over this with a guess: an unmatched monitor falls back
-to the default layout and says so, rather than applying somebody else's layout to the wrong screen.
+**`layoutRevision` is persisted with its template, not derived.** Without it on disk, an edit made in
+one session is indistinguishable from a fresh load in the next, and §7.3's re-placement never happens
+([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)). It is one integer,
+and it is the cheapest field in the file to forget.
+
+**`monitorLayouts` is keyed by `MonitorKey`, never by the snapshot-local `MonitorId`.** The key is
+durable across reconfiguration by construction, and it carries a **confidence**
+([ADR 0015](../../../../docs/decisions/0015-zone-addressing-and-durable-monitor-identity.md)) — because
+two identical monitors with no serial number in their EDID are genuinely indistinguishable, and no
+amount of design makes them otherwise. A `Positional`-only match is therefore treated as *possibly the
+wrong screen*: the monitor falls back to the default layout **and says so**, rather than applying
+somebody else's layout to it, and a dormant stack does not wake on it (§5.3).
 
 ---
 
@@ -441,11 +597,42 @@ Core tests, all runnable on any OS with no desktop:
   surviving two consecutive reconciliations (the case the first draft dropped on the second pass).
 - **Membership tolerance** — a correctly-placed window whose `Bounds` differ from `ObservedBounds` by
   the invisible border is still a member; one moved 200px away is not.
+- **Dormancy** — a stack whose monitor leaves the snapshot keeps its ring and its order, is not
+  bounds-tested, and is not armed; a member closed while dormant is still dropped; the monitor
+  returning with a confident match wakes every member as `AwaitingReplacement`; the monitor returning
+  with a **`Positional`-only** match does **not** wake it. That last one is the test that stops a
+  stack landing on a stranger's screen.
+- **Displacement** — all six rows of §6.1: front-member-only on a deep ring; ring-position exchange
+  between two managed zones; same-zone drop as a no-op; unmanaged source falling back to pre-drag
+  bounds; a `Refused` displacement **degrading to a stack rather than an orphan**; `PlacedDifferently`
+  landing as `Oversized`.
 - **Armed regions** — a zone leaves the armed set the moment its depth falls below two, which is what
-  stops `Win`+wheel swallowing scroll events over an ordinary window.
+  stops `Win`+wheel swallowing scroll events over an ordinary window. Plus the refusal path: a
+  refused publication leaves the *previous* set active, the subtraction retry is accepted, and the
+  empty set is accepted unconditionally — the property §7.3's recovery depends on.
+- **Dispatch by token** — a cycle dispatch carrying a stale region-set version is dropped, and cycling
+  never hit-tests the context cursor to find its zone. Written as a test because the tempting
+  implementation is the wrong one.
 - **Designer** — `Grid` produces the expected cell count and ids; `Split` preserves the original id on
   the first fragment and its stack; `Merge` refuses every non-tiling subset of a 3×3 grid and accepts
   every tiling one; merged rings concatenate in reading order; a retired id is never reissued.
+- **Edits re-place their windows** — the tests that would have caught the defect
+  [ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md) fixes, and the
+  reason they are listed separately from the designer arithmetic:
+  - **Split re-places the surviving cell's stack.** Split a cell holding three windows; the surviving
+    fragment keeps its id, and the edit still yields a `PlacementAction` for **all three** members
+    against the new, smaller rectangle. The assertion is on the placement list, not on the template —
+    a template-only test passes here while the windows sit at the old size.
+  - **Merge re-places both rings.** Merge two cells holding two windows each; the survivor's own two
+    members are re-placed against the enlarged rectangle, not only the four-member concatenated ring.
+  - **The stamp forces it even if the placements were ignored.** After an edit, every member's
+    `PlacedUnder.LayoutRevision` is stale, so a reconciliation run marks them `AwaitingReplacement`
+    rather than testing bounds. This is the guard behind the guard, and it is asserted directly.
+  - **`CellRemap` and `RetiredCellIds` are asserted as data** — split's first-fragment rule and
+    merge's reading-order rule become map entries a test reads, rather than prose an implementer
+    re-derives.
+  - **The transaction is all-or-nothing.** A refused `Merge` returns no `LayoutEdit` at all: template,
+    revision and occupancy are untouched, and no placement runs.
 - **Settings migration** — round-trip and defaults, per MODULE_SPEC §6.
 
 Manual-validation rows (`Z-1` … `Z-6`) cover what no test can: placement on a real desktop, the
@@ -460,9 +647,11 @@ that ends outside any zone.
 | 2 | **Wheel hook is on every scroll on the machine** | Armed-region test only, pre-resolved, fail-open; measured latency budget |
 | 3 | **Swallowing a wheel event wrongly breaks scrolling** | Arm only zones with depth ≥ 2; modifier required; pass through on any doubt |
 | 4 | **Stacks are invisible without UI** | Overlay shows depth during drag in M1; a tab strip is the named next milestone |
-| 5 | **Monitor identity across reconfiguration** (§8.3) | `MonitorKey` carries a confidence; a `Positional` match that may be wrong falls back to the default layout **and says so** ([ADR 0015](../../../../docs/decisions/0015-zone-addressing-and-durable-monitor-identity.md)) |
+| 5 | **Monitor identity across reconfiguration** (§8.3) | `MonitorKey` carries a confidence; a `Positional` match that may be wrong falls back to the default layout **and says so** ([ADR 0015](../../../../docs/decisions/0015-zone-addressing-and-durable-monitor-identity.md)), and does not wake a dormant stack (§5.3) |
 | 6 | **`PlacedDifferently` breaks stack coherence** (§5.2) | Surface it as `Oversized`; never fight the application |
 | 7 | **Stack membership does not survive a restart** | Accepted for M1 — window handles do not survive either. Re-associating by process and title is a heuristic that will be wrong silently, which is worse than starting empty |
+| 8 | **An edit that half-applies** — new template, old occupancy, stale armed regions | One `LayoutEdit` transaction applied in one step (§7.3); the `GeometryStamp` catches anything that escapes it ([ADR 0019](../../../../docs/decisions/0019-layout-edits-are-a-transaction.md)) |
+| 9 | **Another module holds a region Zones needs to arm** | Subtraction retry, then the empty set — never a rollback of the user's layout (§7.3). Cycling degrades on named zones; the chord bindings are unaffected |
 
 ---
 

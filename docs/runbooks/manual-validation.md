@@ -507,15 +507,33 @@ is to compare against the same input with Coordinator not running.
    browser (`Ctrl`+wheel zooms) is a good proxy for confirming that modified wheel events reach the
    application at all when Coordinator is not arming that region.
 
-### Z-6 — the overlay always comes down
+### Z-6 — one gesture, one lifecycle: the overlay always comes down
 
-**Proves:** the paired `MoveSizeStart`/`MoveSizeEnd` guarantee, whose failure mode is an overlay
-stuck on the user's screen.
+**Proves:** Conduit's input-gesture guarantee that **exactly one `Ended` follows every `Started`**,
+which is the single mechanism Zones relies on for the overlay
+([ADR 0017](../decisions/0017-invocation-context-and-one-drag-lifecycle.md),
+[ARCHITECTURE §6](../../src/modules/zones/docs/ARCHITECTURE.md#6-drag-to-snap)). Its failure mode is
+an overlay stuck on the user's screen with no way to dismiss it.
+
+> **What this scenario is really testing.** Zones subscribes to the gesture stream and to **nothing
+> else** for dragging — the earlier design also used the window-event pair
+> `MoveSizeStart`/`MoveSizeEnd`, and had an undefined race over which stream owned taking the overlay
+> down. Each abort below is a different way for a drag to end *without a normal drop*, and the point
+> is that every one produces exactly one `Ended` from one stream. A stuck overlay here means the
+> guarantee is not real, which is a **Conduit** finding, not a Zones one — record it against the
+> pillar.
 
 1. Start a drag with the modifier, then press **Escape**. **Expect:** overlay gone, window unmoved.
 2. Start a drag, release outside any zone. **Expect:** overlay gone, window left where dropped.
 3. Start a drag and **lock the session** mid-drag (Win+L), then unlock. **Expect:** no overlay.
 4. Start a drag and unplug a monitor mid-drag. **Expect:** no overlay; no crash.
+5. Start a drag and **kill the dragged window's process** mid-drag (Task Manager). **Expect:** overlay
+   gone. The gesture must end even though the thing being dragged no longer exists.
+6. Complete an ordinary drop, then check the overlay count. **Expect:** exactly one overlay existed
+   and it is gone — not two stacked, which is what a second stream re-entering would produce.
+
+**Record the abort that failed, not just "Z-6 FAIL".** These six differ in *which* termination path
+the OS takes, and the one that breaks is the diagnosis.
 
 ---
 

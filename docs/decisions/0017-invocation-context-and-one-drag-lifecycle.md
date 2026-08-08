@@ -1,7 +1,9 @@
 # ADR 0017 — Every dispatch carries an invocation context, and a drag has exactly one lifecycle
 
 Date: 2026-08-08
-Status: Accepted
+Status: Accepted · **Corrected same day after review of PR #2** — the context is captured at
+**recognition**, not sampled at dispatch, and what is capturable differs by source. See §1 below and
+[CONDUIT §5.5](../CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context).
 
 ## Context
 
@@ -24,37 +26,59 @@ each stream believes it owns taking the overlay down.
 
 ## Decision
 
-### 1. Every dispatch carries an `InvocationContext`, sampled by Conduit at dispatch time
+### 1. Every dispatch carries an `InvocationContext`, **captured at recognition**
 
 ```csharp
 // SKETCH — illustrative, not compiled.
+enum ContextOrigin { Hook, OsCallback, UserInterface, Timer }
+
 sealed record InvocationContext(
-    Point CursorPosition,          // PhysicalVirtualScreen
-    MonitorId? MonitorUnderCursor,
-    WindowRef? ForegroundWindow,
+    ContextOrigin Origin,
+    long CapturedAtTicks,            // monotonic, at recognition
+    Point? CursorPosition,           // PhysicalVirtualScreen; null for Timer
+    WindowRef? ForegroundWindow,     // null when there is none, or none resolvable
     int TopologyGeneration,
-    long SampledAtTicks);
+    long FactsPublishedAtTicks);     // Hook origin: the age of the cached facts
 ```
 
-**Conduit samples it; Atlas defines and provides it.** Conduit is on the dispatch path and knows when
-"now" is; Atlas is the single source of desktop truth and owns what "the cursor" and "the foreground
-window" mean. So Conduit asks Atlas for a **point sample** — a deliberately cheap read, not a full
-snapshot — and stamps it onto the payload. A module never queries either.
+**Capture is at recognition, not at dispatch.** *This ADR first said "sampled at dispatch", which is
+wrong and worth recording as wrong.* [CONDUIT §5.3](../CONDUIT.md#53-the-hand-off) puts recognition on
+the hook or OS callback and dispatch on a worker, with a queue between them. A context sampled on the
+worker describes the world after an unbounded queue delay — precisely the interval in which the user
+moved the mouse and switched windows. The draft asserted both "sample at dispatch" and "the state
+when it happened", and those cannot both hold.
 
-**Why sample at dispatch rather than let the module read.** By the time a module runs, the user has
-moved the mouse. The semantically correct values are the ones at the instant the chord fired, and
-only the dispatcher is there at that instant.
+**Captured / derived / reconstructed.** *Captured* means read at recognition. *Derived* means a pure
+function of captured facts — `MonitorUnderCursor` from a captured cursor point at a captured
+generation — and may be computed later, because *when* changes no answer. *Reconstructed* means
+reading a live source on the worker and presenting it as event-time truth; that is what is forbidden.
+
+**What is capturable differs by source, so `Origin` is part of the type.** A hook-thread recognizer is
+inside [CONDUIT §5.1](../CONDUIT.md#51-the-hard-constraint)'s budget and **may not call Atlas at all**
+— context capture does not earn an exemption from §5.2's forbidden list. It takes the cursor and the
+timestamp from the event structure, which already carries them, and everything else from an
+**atomically-published `DesktopFacts`** record — one reference read, using §3.6's publication
+contract rather than a second mechanism. Window events and tray actions run where a live Atlas point
+sample is both allowed and accurate, so they take one. A **schedule tick has no event-time cursor at
+all**: those fields are null and `Origin` says why, rather than fabricating "wherever the mouse
+happens to be".
 
 **"Focused" means** the foreground top-level window as the OS reports it, resolved to a `WindowRef`,
 or `null`. Null is ordinary, not exceptional: the desktop itself can have focus, and a secure or
 elevated window may not be resolvable.
 
-**Freshness is the caller's check, not a promise.** The context carries the topology generation and a
-monotonic stamp. A module that goes on to read a full snapshot compares generations; a mismatch means
-the world moved and the right answer is to refuse, not to proceed on mixed data.
+**A cached fact carries its own age.** On a `Hook` context, `ForegroundWindow` is true as of
+`FactsPublishedAtTicks`, not `CapturedAtTicks`. The payload states the difference rather than implying
+a freshness it does not have, and Conduit marks `ContextStale` when the gap exceeds a bound.
+
+**Dispatch stamps `DispatchedAtTicks` and nothing else**, so a module can refuse work that went cold
+in the queue without reading a clock — and without any captured field being rewritten.
+
+**Freshness against a full snapshot remains the caller's check.** A module that reads an Atlas
+snapshot compares `TopologyGeneration`; a mismatch means refuse, not proceed on mixed data.
 
 **Refusals** are values, as everywhere else: `NoForegroundWindow`, `ForegroundNotManageable`
-(elevated or system), `NoMonitorUnderCursor`, `ContextStale`.
+(elevated or system), `NoMonitorUnderCursor`, `NoCursorForOrigin`, `ContextStale`.
 
 ### 2. A drag is one gesture, with the dragged window in the payload
 
@@ -77,14 +101,21 @@ decision removes.
   inventing a focus cache.
 - **Cleanup ownership is unambiguous.** One `Started`, one `Ended`, one owner of the overlay. The
   race is gone rather than documented.
-- **Conduit now depends on Atlas** for the point sample, where before the pillars were independent.
-  This is the significant cost. Accepted because the alternative is worse in both directions: Conduit
-  reading the desktop itself would duplicate the truth Atlas exists to hold single, and pushing the
-  problem to modules would put desktop queries in every module that wants a cursor position. The
-  dependency is one-way and narrow — Conduit asks for a sample and does not interpret it.
-- **The point sample must be genuinely cheap**, because it runs on every dispatch. It is a handful of
-  reads, not an enumeration, and it is explicitly *not* a snapshot: a module that needs the full
-  desktop still asks Atlas for one and checks the generation.
+- **Conduit now depends on Atlas** for the point sample and the published facts, where before the
+  pillars were independent. This is the significant cost. Accepted because the alternative is worse in
+  both directions: Conduit reading the desktop itself would duplicate the truth Atlas exists to hold
+  single, and pushing the problem to modules would put desktop queries in every module that wants a
+  cursor position. The dependency is one-way and narrow — Conduit asks and does not interpret.
+- **The point sample must be genuinely cheap**, because it runs on every non-hook recognition. It is a
+  handful of reads, not an enumeration, and it is explicitly *not* a snapshot: a module that needs the
+  full desktop still asks Atlas for one and checks the generation.
+- **Atlas gains a publication duty it did not have**: an immutable `DesktopFacts` record, republished
+  on foreground and topology change. Real work, and it is the price of a hook-thread recognizer being
+  able to capture a foreground window without calling anything. It reuses ADR 0013's swap contract
+  rather than inventing a second way to hand data to the hook thread.
+- **Two contexts of different origins are not interchangeable**, and a module that ignores `Origin`
+  will eventually read a null cursor from a schedule tick. Making the origin part of the type is what
+  turns that into a compile-time-visible question instead of a null-reference at 2am.
 - **A stale context is now expressible**, so "the world moved between the keypress and the work" has a
   name and a refusal instead of being an unnoticed source of wrong placements.
 - **`InvocationContext` appears in every dispatch payload**, including ones that do not need it (a
@@ -106,6 +137,17 @@ decision removes.
   every dispatch. Rejected for the same cost reason, plus it reintroduces the timing problem — the
   snapshot is taken *after* the module is running, so it answers "where is the mouse now", not "where
   was it when the user pressed the key".
+- **Sample the context on the dispatch worker** — the first draft of this ADR. Rejected above: it puts
+  the read on the far side of the queue, and the payload would then describe a moment nobody asked
+  about while claiming to describe the moment of the event.
+- **Let the hook thread call `GetForegroundWindow` directly.** It is widely believed to be cheap.
+  Rejected on [CONDUIT §5.2](../CONDUIT.md#52-what-may-happen-inside-a-hook-callback)'s own terms: an
+  operation whose *worst* case is not known is not permitted on that path, and "usually fast" is
+  exactly the reasoning that budget exists to overrule. The published record makes the read a
+  reference load, whose worst case is known.
+- **Give every origin the same fields and fill the gaps with defaults** — a zero cursor for a schedule
+  tick. Rejected: a fabricated fact is indistinguishable from a real one at the point of use, and
+  `(0, 0)` is a real screen coordinate.
 - **Keep both drag streams and define an ordering between them.** Possible, and it means specifying
   cross-stream ordering guarantees for the whole taxonomy to solve one consumer's problem. Collapsing
   to one stream is smaller and removes the question instead of answering it.

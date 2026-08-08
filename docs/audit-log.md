@@ -26,6 +26,71 @@ related:
 
 ---
 
+## 2026-08-08 — PR #2 round 4: the four implementation-forcing gaps in the Zones design
+
+**Scope:** the Zones module design and the two pillar contracts it extends, re-read against a review
+that named four gaps that would force an implementer to invent missing decisions, plus a semantic
+sweep for statements the earlier rounds left behind.
+
+**Mechanical result:** `coord audit` 0/0/0 · `coord audit --since origin/main` 0/0/0 ·
+`coord map --check` clean · 11 scaffold tests green. **No C# changed, so nothing here is a claim
+about compilation**, and nothing in this repository has yet run on Windows.
+
+### The four gaps, and what each turned out to be
+
+| # | Gap | Root cause | Landed as |
+|---|---|---|---|
+| 1 | A layout edit could not transform occupancy, and nothing signalled that a surviving cell's stack needed re-placing | The operations were typed `LayoutTemplate → LayoutTemplate`, so the occupancy half of their own described behaviour had nowhere to live | [ADR 0019](decisions/0019-layout-edits-are-a-transaction.md) — `LayoutEdit` transaction + `GeometryStamp(topology, layoutRevision)` |
+| 2 | `InvocationContext` was specified as *sampled at dispatch* | Dispatch is on the far side of a queue from recognition, so the doc asserted both "sample at dispatch" and "the state when it happened" | [CONDUIT §5.5](CONDUIT.md#55-what-every-dispatch-carries--the-invocation-context) rewritten around capture-at-recognition; [ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md) corrected |
+| 3 | Pointer-region arbitration resolved overlaps by "earlier registration wins", and the payload contradicted ADR 0013 | Registration order is a property of how the host happened to load modules that run — an unstable sort | [CONDUIT §3.6](CONDUIT.md#36-pointer-gesture) — user priority then stable module id; withdrawal-always-succeeds; token-not-coordinates reconciled |
+| 4 | A removed monitor had two contradictory answers, and `stackOnDrop = false` was defined for one shape of drop | Both are ADR 0016 cases that were closed for the common case and left open at the edges | [ADR 0020](decisions/0020-dormant-stacks-and-the-displacement-rules.md) — dormancy, and displacement fully specified |
+
+### The pattern worth recording
+
+**Three of the four are the same defect: a decision recorded in prose that its own type signature
+cannot express.** Merge was described as concatenating rings by a function with no ring in scope; the
+invocation context was described as event-time truth by a mechanism that reads after the queue; the
+pointer payload was described as a cursor position by a contract that had already replaced it with a
+token. In each case the prose was the correct intent and the signature was the bug — which is the
+argument for writing the sketch types out in the design rather than only describing behaviour, since
+the contradiction is invisible until the two sit next to each other.
+
+**Gap 3's root cause generalises past this pillar.** "First one wins" reads as deterministic and is
+not: it is deterministic *given a load order*, and load order is not an input anyone controls or can
+see. Any future arbitration rule in this project should be checked against the same question — would
+two runs of the same configuration produce the same winner?
+
+### Semantic sweep — found by grepping for consequences, not for the claim
+
+The earlier rounds established that grepping for a retracted sentence misses the places that state
+its *consequence* in different words. Four such places this pass:
+
+- **[ATLAS §4.2](ATLAS.md#42-drag-take-the-snapshot-once)** anchored the drag snapshot's release to
+  `MoveSizeEnd` — a correct sentence about the wrong stream once Zones moved to the gesture. Rewritten
+  around "pick one stream and hold the snapshot against that one".
+- **[ADR 0016 §6](decisions/0016-zone-occupancy-member-states.md)** still ended by recording an orphan
+  as `Displaced`. ADR 0020 §4 removes the orphan, so the state has nothing left to name.
+- **`src/pillars/atlas/README.md` and `src/pillars/conduit/README.md`** each carried the heading
+  *"Status: contract types written, never compiled"* directly above a body citing the green CI run —
+  **self-contradicting inside one screen**, and missed by the PR #1 evidence sweep because that sweep
+  searched for banner text and these were section headings.
+- **`coord.py`'s generated placeholder** told every future scaffolded module that "nothing in this
+  repository has ever been through a C# compiler".
+
+That last pair is the reusable lesson: the PR #1 sweep fixed 65 claims and still left four, all of
+them in *headings and generated output* rather than in prose. **A sweep that greps the body text does
+not see the table of contents or the code generator.**
+
+### Still owed
+
+- Everything in [NEXT.md](NEXT.md) — P1 and P2 come before any Zones code exists.
+- `Z-1`…`Z-6` remain **written and never executed**; `Z-6` was rewritten this pass around the single
+  gesture lifecycle and gained two aborts (process killed mid-drag; overlay count after a normal drop).
+- The Zones design is now *fully specified and entirely unimplemented*, which is the honest state to
+  shelve it in — and the gap between those two words is the whole of P3.
+
+---
+
 ## 2026-08-08 — PR #1 evidence closeout (repository-wide sweep after the first green CI run)
 
 **Scope:** every claim in the repository about build and test status, re-stated against an observed

@@ -55,10 +55,10 @@ they change. Conduit stores them. The hook does a rectangle test and nothing els
 
 | Required | This kind |
 |---|---|
-| **Refusal reasons** | `RegionsOverlapAnotherOwner` (another module armed an intersecting region with the same modifier) · `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded) |
-| **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide |
+| **Refusal reasons** | `RegionsOverlapAnotherOwner` (another module holds an intersecting region with the same modifier; the refusal **names the contested rectangles**) · `ModifierReserved` (a modifier Conduit will not hook) · `TooManyRegions` (the per-module cap that keeps the hook test bounded) |
+| **Conflict rule** | Two intents conflict when their modifier matches **and** their armed regions intersect. Disjoint regions with the same modifier are fine — that is the normal case, and it is why the conflict rule is geometric rather than modifier-wide. **Who wins is decided by explicit user priority, then by stable module id** — never by registration order, which varies with how the host happened to load modules that run ([CONDUIT §3.6](../CONDUIT.md#36-pointer-gesture)) |
 | **Dispatch class** | Hook for the *decision*; the **dispatch runs on a worker**. The hook's entire job is: test, swallow-or-pass, queue |
-| **Guarantee statement** | Delivered as a discrete event carrying the capability id, the cursor position, and a tick delta. **Coalesced** under load. **Not** guaranteed: one dispatch per physical detent, ordering against other input kinds, or delivery at all when the queue is saturated — a dropped cycle tick is a cosmetic loss, and pretending otherwise would mean buffering on the hook path |
+| **Guarantee statement** | Delivered as a discrete event carrying the capability id, the **matched zone token**, the **region-set version** it matched under, and a tick delta. **Coalesced** under load, keyed on `(intent, zone token)`. **Not** guaranteed: one dispatch per physical detent, ordering against other input kinds, or delivery at all when the queue is saturated — a dropped cycle tick is a cosmetic loss, and pretending otherwise would mean buffering on the hook path |
 | **Core model with a fake source** | The recognizer is a pure function `(cursor, modifiers, armed regions) -> Swallow \| PassThrough`, driven in tests by a fake input source. Fully testable with no desktop |
 | **Manual-validation row** | `Z-3` (hook latency under load) and `Z-5` (swallowing does not break scrolling in a stacked window) |
 
@@ -100,6 +100,17 @@ broken.
   reference read concurrently by another thread, with no ownership rule and no protection against the
   owner detaching mid-read — and it is easy to write a design that answers "is this data current?"
   while never answering "is it safe to read at all?".
+
+- **The dispatch payload is a token, not a coordinate.** *This ADR's guarantee row first said "the
+  cursor position", which contradicts the token contract added to CONDUIT §3.6 in the same review.*
+  Both facts reach the module — the token as the payload, the cursor as part of §5.5's invocation
+  context — and the reconciliation is about **authority rather than availability**: the token is the
+  only thing permitted to answer *which zone*, and a module that hit-tests the cursor instead has
+  reintroduced the staleness the token removes.
+- **Arming can be refused; withdrawing cannot.** A module may always publish a subset of what it
+  already holds, and the empty set is always accepted. Without that, a refused update can leave a
+  module holding regions it has decided are wrong with no safe state to retreat to — and a refusal
+  arriving mid-way through a module's own multi-step change would have no correct resolution.
 
 ## Alternatives considered
 

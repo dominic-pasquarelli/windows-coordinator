@@ -1,7 +1,10 @@
 # ADR 0018 — Layout editing is three pure operations, and cell ids survive them
 
 Date: 2026-08-08
-Status: Accepted
+Status: Accepted · **Corrected by [ADR 0019](0019-layout-edits-are-a-transaction.md)** — the three
+operations return a `LayoutEdit` transaction (template + revision + remap + retired ids + transformed
+occupancy + placements), not a bare `LayoutTemplate`. The id rules below stand unchanged; the
+signature and the hand-off in *"Editing is a settings-save"* are superseded.
 
 ## Context
 
@@ -24,7 +27,13 @@ only if they tile their bounding box exactly.
 
 ## Decision
 
-Three pure operations on a `LayoutTemplate`, each returning a result that can be a **refusal**.
+Three pure operations, each returning a result that can be a **refusal**.
+
+> **Amended by [ADR 0019](0019-layout-edits-are-a-transaction.md).** As first written, all three took
+> and returned a `LayoutTemplate` — which cannot express the occupancy consequences this ADR goes on
+> to describe (merge concatenating rings), and cannot signal that a surviving cell's stack needs
+> re-placing. They now take the template *and* the occupancy over it, and return a `LayoutEdit`. Read
+> the id rules below as the content of `CellRemap` and `RetiredCellIds`.
 
 ### `Grid(columns, rows)`
 
@@ -56,10 +65,16 @@ result that matches what the user did; discarding them would punish editing.
 
 ### Editing is a settings-save, not a live operation
 
-Layout edits happen at authoring time and go through the ordinary settings path. Occupancy is then
-reconciled against the new template by
-[ADR 0016](0016-zone-occupancy-member-states.md)'s reconciler, with cells that vanished entirely
-(neither survivor nor fragment) releasing their windows as unassigned rather than moving them.
+Layout edits happen at authoring time and go through the ordinary settings path.
+
+> **This paragraph only — corrected by [ADR 0019](0019-layout-edits-are-a-transaction.md).** The
+> rest of this ADR stands. It originally continued:
+> *"Occupancy is then reconciled against the new template by ADR 0016's reconciler, with cells that
+> vanished entirely releasing their windows as unassigned."* That hand-off does not work — the
+> reconciler cannot detect a cell whose id survived but whose rectangle changed, because no monitor
+> changed and the address still resolves. The edit itself now transforms occupancy and emits the
+> placements, and the reconciler sees only surviving cells. It is still a settings-save; what is saved
+> is the whole transaction, including the bumped `LayoutRevision`.
 
 ## Consequences
 
@@ -102,6 +117,8 @@ reconciled against the new template by
 
 ## See also
 
+- [ADR 0019](0019-layout-edits-are-a-transaction.md) — **read this with the above**; it corrects the
+  operation signatures and the occupancy hand-off.
 - [ADR 0015](0015-zone-addressing-and-durable-monitor-identity.md) — what a cell id is part of.
-- [ADR 0016](0016-zone-occupancy-member-states.md) — the reconciler an edit hands off to.
+- [ADR 0016](0016-zone-occupancy-member-states.md) — the member states an edit stamps.
 - [ARCHITECTURE §7](../../src/modules/zones/docs/ARCHITECTURE.md#7-the-layout-designer) — the module-side view.

@@ -160,6 +160,21 @@ They are exposed as a **point sample** rather than as snapshot fields. A snapsho
 taken *after* a module starts running, which answers "where is the cursor now" when the question was
 "where was it when the user pressed the key".
 
+**And a point sample is not available everywhere**, which forces a second delivery path. Conduit
+captures the invocation context at *recognition*, and for a hook-thread recognizer that happens inside
+a microsecond budget where calling Atlas is forbidden outright
+([CONDUIT §5.2](CONDUIT.md#52-what-may-happen-inside-a-hook-callback)). So Atlas additionally
+**publishes an immutable `DesktopFacts` record** — foreground window, monitor geometry, topology
+generation, publication stamp — and republishes it whenever the foreground window or the topology
+changes. Publication is an atomic reference swap under
+[CONDUIT §3.6](CONDUIT.md#36-pointer-gesture)'s contract, so the hook thread's read is a reference
+load with a known worst case.
+
+The two paths answer different questions and the difference is deliberate: a point sample is *live but
+only where it is safe to take one*; the published record is *safe to read anywhere but true as of its
+stamp*, which is why a context built from it carries that stamp
+([ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md)).
+
 ---
 
 ## 4. The snapshot contract
@@ -231,15 +246,23 @@ temptation is to re-read the desktop on every mouse move. That is a full enumera
 interaction path, at mouse-event frequency, and it is precisely what
 [principle 7 — *resolve once, execute cheap*](COORDINATOR.md#7-non-negotiable-principles) forbids.
 
-The design instead: **take one snapshot at `MoveSizeStart`, resolve the zone rectangles once, and
+The design instead: **take one snapshot when the drag starts, resolve the zone rectangles once, and
 run the entire drag against pre-computed geometry.** Hit-testing the cursor against a resolved
 `ZoneSet` is comparison arithmetic. The only thing that can invalidate it mid-drag is a topology
 generation bump, which is rare, detectable, and can be handled by recomputing once rather than
 continuously.
 
-This is where the two pillars interlock most tightly: Conduit's guarantee that `MoveSizeEnd` always
-follows `MoveSizeStart` ([CONDUIT.md §3.2](CONDUIT.md)) is what makes a snapshot held across a drag
-safe to release.
+This is where the two pillars interlock most tightly, and **which Conduit stream marks the boundaries
+is what makes the held snapshot safe to release.** A drag consumer subscribes to the **input gesture**
+kind, whose `Started`/`Ended` pairing is the cleanup guarantee: exactly one `Ended` per `Started`, so
+the snapshot taken at the start always has exactly one release point. The window-event pair
+`MoveSizeStart`/`MoveSizeEnd` carries a similar guarantee
+([CONDUIT §3.2](CONDUIT.md#32-window-event)) and remains available for consumers that want raw
+move/size transitions — but **a consumer picks one stream and holds the snapshot against that one**.
+Composing both to bracket a single drag is what
+[ADR 0017](decisions/0017-invocation-context-and-one-drag-lifecycle.md) forbids: there is no ordering
+between intent streams, so two candidate release points race, and the failure mode is a snapshot
+released while the drag is still reading it.
 
 ---
 
